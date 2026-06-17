@@ -359,15 +359,19 @@ Note: AI summary of results deferred to v1.1
 
 ### Non-Functional Requirements
 
-| NFR | Description | How it is met |
-|-----|-------------|---------------|
-| NFR-2 | Nothing lost if AI server goes down | Processing queue in PostgreSQL persists across restarts |
-| NFR-3 | Zero external network calls | vLLM, Whisper, Qdrant, Redis all run locally |
-| NFR-4 | Misread dates are the primary risk | Confirm screen + date sanity checks + confidence highlighting |
-| NFR-5 | Dates displayed as DD MMM YYYY | Applied at render layer in React |
-| NFR-6 | One file processed at a time (v1) | Queue with single worker |
-| NFR-7 | AI model swappable via config | VLLM_MODEL env variable — one-line change |
-| NFR-9 | App works when AI server is down | Manual entry, keyword search, calendar view all bypass AI |
+## Non-Functional Requirements (NFRs)
+
+| NFR   | Description                              | How it is Met                                                      |
+| ----- | ---------------------------------------- | ------------------------------------------------------------------ |
+| NFR-1 | Correctness beats speed                  | Confirmation step before creating events/tasks                     |
+| NFR-2 | Nothing captured by the user can be lost | PostgreSQL retry queue persists across restarts                    |
+| NFR-3 | Total privacy, no external network calls | All AI services run locally                                        |
+| NFR-4 | Misread dates are the primary risk       | Validation rules, confidence highlighting, and confirmation screen |
+| NFR-5 | Dates displayed as DD MMM YYYY           | Enforced at the UI layer                                           |
+| NFR-6 | One file processed at a time (v1)        | Queue with a single worker                                         |
+| NFR-7 | AI models are swappable                  | Configurable through environment variables                         |
+| NFR-8 | Use an existing React calendar library   | Calendar built using a maintained React library                    |
+| NFR-9 | App remains usable if AI services fail   | Core features work normally; AI jobs remain queued                 |
 
 ---
 
@@ -375,9 +379,9 @@ Note: AI summary of results deferred to v1.1
 
 | Name | Role | Branch |
 |------|------|--------|
-| Kanishk Kushwaha | Backend, Infrastructure, Vision LLM | `feature/api-core`, `feature/vision-extraction` |
-| Jhanvi | Frontend, UI/UX | `feature/frontend-shell`, `feature/confirm-screen` |
-| Kusagra | Database, CRUD APIs | `feature/database-schema`, `feature/calendar-view` |
+| Jahnavi Rajpoot | Backend, Infrastructure,CRUD APIs  | `feature/api-core`, `feature/calendar-view`|
+| Khushagr | Frontend, UI/UX | `feature/frontend-shell`, `feature/confirm-screen` |
+|  Kanishk Kushwaha | Database, Vision LLM | `feature/database-schema`,  `feature/vision-extraction` |
 
 ---
 
@@ -415,8 +419,3 @@ This is an internal project. If you are a team member:
 
 See [`Git-Team-Guide`](./Git-Team-Guide-AI-Notes-Scheduler.docx) for the full workflow.
 
----
-
-## License
-
-MIT — see [LICENSE](./LICENSE) for details.
