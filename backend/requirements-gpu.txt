@@ -1,0 +1,14 @@
+# ── PyTorch with CUDA 12.8 (Python 3.11, Windows) ────────────
+# Download from: https://download.pytorch.org/whl/cu128
+# On an internet machine run: pip download -r requirements-gpu.txt -d ./wheels
+# Then on offline machine:   pip install --no-index --find-links=./wheels -r requirements-gpu.txt
+
+torch==2.6.0+cu128
+torchaudio==2.6.0+cu128
+
+# ── Whisper STT (GPU-accelerated via CTranslate2) ─────────────
+faster-whisper==1.1.0
+
+# ── BGE Embeddings for semantic search ───────────────────────
+FlagEmbedding==1.2.11
+sentence-transformers==3.3.1
