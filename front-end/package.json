@@ -12,6 +12,7 @@
   "dependencies": {
     "@schedule-x/calendar": "^4.6.0",
     "@schedule-x/react": "^4.1.0",
+    "@schedule-x/theme-default": "^4.6.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.0",
