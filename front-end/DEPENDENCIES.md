@@ -1,95 +1,71 @@
-# Frontend Dependencies
+# Front-End Dependency Record
 
-## React + Vite
+Project: AI Notes & Scheduling
 
 Purpose:
-Frontend application framework and build tool.
+Track all front-end dependencies, installation commands, and versions verified during development. This document is intended to support deployment in an air-gapped environment.
 
-Installed using:
+---
+
+# Verified Dependencies
+
+## React
+
+Purpose:
+Primary front-end framework.
+
+Installed Through:
 
 ```bash
 npm create vite@latest . -- --template react
 npm install
 ```
 
----
-
-## React Router DOM
-
-Purpose:
-Client-side routing between pages.
-
-Used for:
-
-- /dashboard
-- /upload
-- /calendar
-- /tasks
-- /search
-
-Installed using:
-
-```bash
-npm install react-router-dom
-```
-
----
-
-# Future Dependencies
-
-## Schedule-X
-
-Purpose:
-Calendar component.
-
-Planned installation:
-
-```bash
-npm install @schedule-x/calendar @schedule-x/react
-```
-
 Status:
-Not installed yet.
+Verified Working
 
 ---
 
-## Temporal Polyfill
+## React DOM
 
 Purpose:
-Date/time support required by Schedule-X.
+Renders React components into the browser DOM.
 
-Planned installation:
-
-```bash
-npm install temporal-polyfill
-```
-
-Status:
-Not installed yet.
-
-
-# Frontend Dependencies
-
-## React + Vite
-
-Purpose:
-Frontend framework and development environment.
-
-Installation:
+Installed Through:
 
 ```bash
 npm create vite@latest . -- --template react
 npm install
 ```
 
+Status:
+Verified Working
+
+---
+
+## Vite
+
+Purpose:
+Development server and build system.
+
+Installed Through:
+
+```bash
+npm create vite@latest . -- --template react
+npm install
+```
+
+Status:
+Verified Working
+
 ---
 
 ## React Router DOM
 
 Purpose:
-Client-side routing between application pages.
+Client-side routing.
 
-Used for:
+Used For:
 
 * /dashboard
 * /upload
@@ -103,12 +79,23 @@ Installation:
 npm install react-router-dom
 ```
 
+Status:
+Verified Working
+
 ---
 
 ## Schedule-X Calendar
 
 Purpose:
-Calendar component for month, week and day views.
+Calendar component used for scheduling views.
+
+Features Planned:
+
+* Month View
+* Week View
+* Day View
+* Event Display
+* Event Details Panel
 
 Installation:
 
@@ -117,14 +104,49 @@ npm install @schedule-x/calendar @schedule-x/react
 ```
 
 Status:
-Installed
+Verified Working
+
+---
+
+## Schedule-X React
+
+Purpose:
+React integration layer for Schedule-X.
+
+Installation:
+
+```bash
+npm install @schedule-x/calendar @schedule-x/react
+```
+
+Status:
+Verified Working
+
+---
+
+## Schedule-X Default Theme
+
+Purpose:
+Default styling for Schedule-X components.
+
+Installation:
+
+```bash
+npm install @schedule-x/theme-default
+```
+
+Status:
+Verified Working
 
 ---
 
 ## Temporal Polyfill
 
 Purpose:
-Date and time support required by Schedule-X.
+Required by Schedule-X for date and time handling.
+
+IMPORTANT:
+Schedule-X 4.6.0 requires version 0.3.0.
 
 Installation:
 
@@ -133,28 +155,63 @@ npm install temporal-polyfill@0.3.0
 ```
 
 Status:
-Installed
+Verified Working
 
 ---
 
-## Important Files
+# Important Project Files
 
-Dependency versions:
+These files must always be preserved and transferred together.
 
 ```text
 package.json
 package-lock.json
+DEPENDENCIES.md
 ```
-
-These files must always be transferred together with the source code.
 
 ---
 
-## Air-Gapped Deployment Notes
+# Air-Gapped Deployment Checklist
 
-Before deployment to the isolated environment:
+Before transferring to an isolated environment:
 
-1. Verify all required packages are present in package.json.
-2. Preserve package-lock.json.
-3. Export npm package cache for offline installation.
-4. Transfer source code, package.json, package-lock.json and cached packages together.
+[ ] Source code copied
+
+[ ] package.json copied
+
+[ ] package-lock.json copied
+
+[ ] npm package cache exported
+
+[ ] All required packages available offline
+
+[ ] Dependency versions verified
+
+---
+
+# Current Verified Functionality
+
+The following features have been tested successfully:
+
+[✓] React application startup
+
+[✓] React Router navigation
+
+[✓] Dashboard page
+
+[✓] Upload page
+
+[✓] API service layer
+
+[✓] Schedule-X calendar rendering
+
+[✓] Day view
+
+[✓] Week view
+
+[✓] Month view
+
+---
+
+Last Updated:
+2026-06-18
