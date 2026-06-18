@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from typing import Optional
 from api.models import ManualEvent, EventUpdate
+from api.db import get_db
 
 router = APIRouter(tags=["Events"])
 
@@ -8,8 +9,27 @@ router = APIRouter(tags=["Events"])
 @router.get("/events/today")
 def events_today():
     """FR-33 — today's meetings for dashboard."""
-    # TODO Day 4: SELECT * FROM events WHERE event_date = CURRENT_DATE ORDER BY event_time
-    return {"events": [], "date": ""}
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT *
+            FROM events
+            WHERE event_date = CURRENT_DATE
+            AND status <> 'deleted'
+            ORDER BY event_time
+        """)
+        events = cur.fetchall()
+        return {
+            "events": events,
+            "date": str(events[0]["event_date"]) if events else ""
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
 
 
 @router.get("/events")
@@ -19,16 +39,77 @@ def list_events(
     status   : Optional[str] = None,
 ):
     """FR-16 — list events with optional date range and status filter."""
-    # TODO Day 4: SELECT with WHERE clauses
-    return {"events": []}
+    """FR-16 — list events with optional date range and status filter."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        query = """
+            SELECT *
+            FROM events
+            WHERE 1=1
+        """
+        params = []
+
+        if from_date:
+            query += " AND event_date >= %s"
+            params.append(from_date)
+
+        if to_date:
+            query += " AND event_date <= %s"
+            params.append(to_date)
+
+        if status:
+            query += " AND status = %s"
+            params.append(status)
+
+        query += " ORDER BY event_date, event_time"
+        cur.execute(query, params)
+        return {
+            "events": cur.fetchall()
+        }
+    finally:
+        cur.close()
+        conn.close()
 
 
 @router.get("/events/{event_id}")
 def get_event(event_id: int):
     """FR-16 — single event with source document links."""
-    # TODO Day 4: SELECT event + JOIN event_documents + JOIN documents
-    return {"event": None, "source_documents": []}
+    conn = get_db()
+    cur = conn.cursor()
 
+    try:
+        cur.execute("""
+            SELECT *
+            FROM events
+            WHERE id = %s
+        """, (event_id,))
+
+        event = cur.fetchone()
+        
+        if not event:
+            raise HTTPException(
+                status_code=404,
+                detail="Event not found"
+            )
+        cur.execute("""
+            SELECT d.*
+            FROM documents d
+            JOIN event_documents ed
+                ON d.id = ed.document_id
+            WHERE ed.event_id = %s
+        """, (event_id,))
+
+        docs = cur.fetchall()
+
+        return {
+            "event": event,
+            "source_documents": docs
+        }
+    finally:
+        cur.close()
+        conn.close()
 
 @router.post("/events/manual")
 def create_event_manual(event: ManualEvent):
