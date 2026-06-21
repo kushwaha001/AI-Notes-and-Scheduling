@@ -167,7 +167,7 @@ CREATE INDEX idx_note_versions_note ON note_versions(note_id);
 
 
 -- LINKED SOURCES  (FR-6, FR-24, FR-25, FR-26, FR-27)
-CREATE TABLE linked_sources (
+CREATE TABLE linked_documents (
     id           SERIAL PRIMARY KEY,
     source_type  TEXT NOT NULL CHECK (source_type IN ('document', 'audio')),
     source_id    INT NOT NULL,                                  -- polymorphic FK -> documents.id or audio_recordings.id
