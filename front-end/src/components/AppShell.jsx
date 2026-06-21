@@ -1,4 +1,5 @@
 import Sidebar from "./Sidebar";
+import BackgroundBlobs from "./BackgroundBlobs";
 
 function AppShell({ children }) {
   return (
@@ -6,20 +7,34 @@ function AppShell({ children }) {
       style={{
         display: "flex",
         minHeight: "100vh",
-        background: "#020617",
-        color: "white",
+        background:
+          "linear-gradient(to bottom right, #f8fafc, #ffffff)",
+        color: "#0f172a",
+        position: "relative",
       }}
     >
+      <BackgroundBlobs />
+
       <Sidebar />
 
       <main
         style={{
           flex: 1,
-          padding: "32px 40px",
+          padding: "40px",
           overflowY: "auto",
+          position: "relative",
+          zIndex: 1,
+          scrollBehavior: "smooth",
         }}
       >
-        {children}
+        <div
+          style={{
+            maxWidth: "1600px",
+            margin: "0 auto",
+          }}
+        >
+          {children}
+        </div>
       </main>
     </div>
   );

@@ -22,6 +22,89 @@ const [saved, setSaved] = useState(false);
 
   return (
     <div>
+      <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "50px",
+    background: "rgba(255,255,255,0.6)",
+    backdropFilter: "blur(10px)",
+    padding: "20px",
+    borderRadius: "20px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  }}
+>
+  <div>
+    <strong
+  style={{
+    color: selectedFile ? "#2563eb" : "#94a3b8",
+  }}
+>
+  1. Upload
+</strong>
+  </div>
+
+  <div
+    style={{
+      width: "60px",
+      height: "2px",
+      background: "#cbd5e1",
+    }}
+  />
+
+  <div>
+    <strong
+  style={{
+    color: isProcessing || showExtraction
+      ? "#2563eb"
+      : "#94a3b8",
+  }}
+>
+  2. Analyze
+</strong>
+  </div>
+
+  <div
+    style={{
+      width: "60px",
+      height: "2px",
+      background: "#cbd5e1",
+    }}
+  />
+
+  <div>
+    <strong
+  style={{
+    color: showExtraction
+      ? "#2563eb"
+      : "#94a3b8",
+  }}
+>
+  3. Review
+</strong>
+  </div>
+
+  <div
+    style={{
+      width: "60px",
+      height: "2px",
+      background: "#cbd5e1",
+    }}
+  />
+
+  <div>
+    <strong
+  style={{
+    color: saved
+      ? "#10b981"
+      : "#94a3b8",
+  }}
+>
+  4. Save
+</strong>
+  </div>
+</div>
       <h1
         style={{
           marginBottom: "10px",
@@ -110,12 +193,37 @@ const [saved, setSaved] = useState(false);
   <div
     style={{
       marginTop: "30px",
-      background: "#172554",
-      padding: "20px",
-      borderRadius: "12px",
+      background: "rgba(255,255,255,0.7)",
+      backdropFilter: "blur(10px)",
+      padding: "30px",
+      borderRadius: "24px",
+      boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
     }}
   >
-    AI is analyzing the document...
+    <h3
+      style={{
+        marginTop: 0,
+        marginBottom: "20px",
+      }}
+    >
+      AI Processing Document
+    </h3>
+
+    <div style={{ marginBottom: "12px" }}>
+      ✓ Reading document
+    </div>
+
+    <div style={{ marginBottom: "12px" }}>
+      ✓ Detecting dates and times
+    </div>
+
+    <div style={{ marginBottom: "12px" }}>
+      ✓ Extracting meeting details
+    </div>
+
+    <div>
+      ✓ Creating calendar event
+    </div>
   </div>
 )}
 {showExtraction && (
@@ -128,13 +236,107 @@ const [saved, setSaved] = useState(false);
       border: "1px solid #1f2937",
     }}
   >
-    <h2>Extraction Results</h2>
+    <h2
+  style={{
+    marginTop: 0,
+    marginBottom: "10px",
+  }}
+>
+  AI Extraction Results
+</h2>
 
-    <p><strong>Reference No:</strong> REF-2026-001</p>
-    <p><strong>Title:</strong> Project Review Meeting</p>
-    <p><strong>Date:</strong> 20 June 2026</p>
-    <p><strong>Time:</strong> 10:00 AM</p>
-    <p><strong>Priority:</strong> High</p>
+<p
+  style={{
+    color: "#64748b",
+    marginBottom: "30px",
+  }}
+>
+  Review the extracted information before creating the calendar event.
+</p>
+
+    <div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "20px",
+    marginTop: "20px",
+  }}
+>
+  <div>
+    <p
+      style={{
+        color: "#64748b",
+        marginBottom: "5px",
+      }}
+    >
+      Reference Number
+    </p>
+
+    <strong>REF-2026-001</strong>
+  </div>
+
+  <div>
+    <p
+      style={{
+        color: "#64748b",
+        marginBottom: "5px",
+      }}
+    >
+      Priority
+    </p>
+
+    <span
+      style={{
+        background: "#fee2e2",
+        color: "#dc2626",
+        padding: "6px 12px",
+        borderRadius: "999px",
+        fontWeight: "600",
+      }}
+    >
+      High
+    </span>
+  </div>
+
+  <div>
+    <p
+      style={{
+        color: "#64748b",
+        marginBottom: "5px",
+      }}
+    >
+      Event Title
+    </p>
+
+    <strong>Project Review Meeting</strong>
+  </div>
+
+  <div>
+    <p
+      style={{
+        color: "#64748b",
+        marginBottom: "5px",
+      }}
+    >
+      Time
+    </p>
+
+    <strong>10:00 AM</strong>
+  </div>
+
+  <div>
+    <p
+      style={{
+        color: "#64748b",
+        marginBottom: "5px",
+      }}
+    >
+      Date
+    </p>
+
+    <strong>20 June 2026</strong>
+  </div>
+</div>
 
     <button
       onClick={() => setSaved(true)}
