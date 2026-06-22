@@ -1,3 +1,5 @@
+front-end/deployment-package/
+front-end/*.zip
 # Environment — never commit real credentials
 backend/.env
 .env
