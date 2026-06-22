@@ -180,8 +180,8 @@ CREATE TABLE linked_documents (
     UNIQUE (source_type, source_id, entity_type, entity_id, link_type)
 );
 
-CREATE INDEX idx_linked_sources_entity ON linked_sources(entity_type, entity_id);
-CREATE INDEX idx_linked_sources_source ON linked_sources(source_type, source_id);
+CREATE INDEX idx_linked_documents_entity ON linked_documents(entity_type, entity_id);
+CREATE INDEX idx_linked_documents_source ON linked_documents(source_type, source_id);
 
 
 -- REMINDERS  (FR-17, FR-37)
@@ -237,6 +237,6 @@ CREATE TABLE system_status (
     gpu_usage_pct       NUMERIC(5,2),
     disk_usage_pct      NUMERIC(5,2),
     queue_length        INT NOT NULL DEFAULT 0,
-    last_backup_at      TIMESTAMP,
+    last_backup_at      TIMESTAMP
 );
 
