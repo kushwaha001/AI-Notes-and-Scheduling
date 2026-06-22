@@ -1,2 +1,29 @@
 front-end/deployment-package/
 front-end/*.zip
+# Environment — never commit real credentials
+backend/.env
+.env
+
+# Uploaded files — keep folder structure, not content
+backend/uploads/docs/*
+backend/uploads/audio/*
+backend/notes/*
+!backend/uploads/docs/.gitkeep
+!backend/uploads/audio/.gitkeep
+!backend/notes/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Logs
+*.log
+*.err
+
+# OS
+.DS_Store
+Thumbs.db
