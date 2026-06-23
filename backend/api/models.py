@@ -71,3 +71,7 @@ class TaskUpdate(BaseModel):
     status   : Optional[str] = None
     priority : Optional[str] = None
     category : Optional[str] = None
+
+
+class LinkDocumentRequest(BaseModel):
+    doc_id: int
