@@ -1,245 +1,273 @@
 import { useEffect, useState } from "react";
-import { getTodayEvents } from "../services/api";
+import { useNavigate } from "react-router-dom";
+import { getDashboard, getAuditLog } from "../services/api";
 import StatCard from "../components/StatCard";
 import { motion } from "framer-motion";
 
+// shared hover style for clickable cards/rows
+const clickable = { cursor: "pointer" };
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function fmtTime(t) {
+  if (!t) return "";
+  return t.slice(0, 5);
+}
+
+function greetingByHour() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good Morning";
+  if (h < 17) return "Good Afternoon";
+  return "Good Evening";
+}
+
 function DashboardPage() {
-  const [events, setEvents] = useState([]);
+  const navigate = useNavigate();
+  const [dash, setDash]   = useState(null);
+  const [audit, setAudit] = useState([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    async function loadEvents() {
-      const data = await getTodayEvents();
-      setEvents(data);
-    }
+    getDashboard()
+      .then(setDash)
+      .catch((e) => setError(e.message));
 
-    loadEvents();
+    getAuditLog({ limit: 5 })
+      .then(setAudit)
+      .catch(() => {});
   }, []);
 
+  const todayEvents  = dash?.today_events          ?? [];
+  const openTasks    = dash?.open_tasks             ?? [];
+  const pendingConf  = dash?.pending_confirmations  ?? [];
+  const pendingReply = dash?.pending_replies        ?? [];
 
-return (
-  <>
-  <div
-  style={{
-    position: "absolute",
-    width: "400px",
-    height: "400px",
-    background:
-      "radial-gradient(circle, rgba(96,165,250,0.25), transparent)",
-    filter: "blur(100px)",
-    zIndex: -1,
-  }}
-/>
-    <motion.div
-      initial={{ opacity: 0, y: -60 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.8 }}
-      style={{ marginBottom: "60px" }}
-    >
-      <p
-        style={{
-          color: "#60a5fa",
-          fontSize: "14px",
-          textTransform: "uppercase",
-          letterSpacing: "2px",
-          marginBottom: "12px",
-        }}
-      >
-        AI Notes & Scheduling
-      </p>
-
-      <h1
-        style={{
-          fontSize: "72px",
-          fontWeight: "800",
-          margin: 0,
-          lineHeight: "1",
-        }}
-      >
-        Good Morning
-      </h1>
-
-      <p
-        style={{
-          color: "#64748b",
-          fontSize: "20px",
-          marginTop: "20px",
-        }}
-      >
-        Manage meetings, deadlines, notes and documents from a single workspace.
-      </p>
-    </motion.div>
-
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-        gap: "24px",
-        marginBottom: "80px",
-      }}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2, duration: 0.6 }}
-      >
-        <StatCard
-          title="Events Today"
-          value={events.length}
-          subtitle="Scheduled today"
-        />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: 0.6 }}
-      >
-        <StatCard
-          title="Pending Tasks"
-          value="5"
-          subtitle="Need attention"
-        />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.6, duration: 0.6 }}
-      >
-        <StatCard
-          title="Deadlines"
-          value="2"
-          subtitle="This week"
-        />
-      </motion.div>
-    </div>
-
-    <div
-      style={{
-        background: "rgba(255,255,255,0.7)",
-        backdropFilter: "blur(10px)",
-        borderRadius: "24px",
-        padding: "24px",
-        marginBottom: "80px",
-      }}
-    >
-      <h2 style={{ marginTop: 0, marginBottom: "24px" }}>
-        Today's Schedule
-      </h2>
-
-      {events.length === 0 ? (
-        <p>No events found.</p>
-      ) : (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px",
-          }}
-        >
-          {events.map((event) => (
-            <div
-              key={event.id}
-              style={{
-                background: "rgba(255,255,255,0.5)",
-                backdropFilter: "blur(10px)",
-                padding: "24px",
-                borderRadius: "20px",
-                boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-              }}
-            >
-              <h3
-                style={{
-                  margin: 0,
-                  marginBottom: "10px",
-                }}
-              >
-                {event.title}
-              </h3>
-
-              <p
-                style={{
-                  margin: 0,
-                  color: "#2563eb",
-                  fontWeight: "600",
-                }}
-              >
-                Priority: {event.priority}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-
-    <motion.div
-      initial={{ opacity: 0, y: 60 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      transition={{ duration: 0.8 }}
-      style={{ marginBottom: "80px" }}
-    >
-      <h2 style={{ fontSize: "32px", marginBottom: "24px" }}>
-        Upcoming Week
-      </h2>
-
+  return (
+    <>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: "24px",
+          position: "absolute",
+          width: "400px",
+          height: "400px",
+          background: "radial-gradient(circle, rgba(96,165,250,0.25), transparent)",
+          filter: "blur(100px)",
+          zIndex: -1,
         }}
+      />
+
+      <motion.div
+        initial={{ opacity: 0, y: -60 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+        style={{ marginBottom: "60px" }}
       >
-        <StatCard
-          title="Meetings"
-          value="8"
-          subtitle="Scheduled this week"
-        />
+        <p style={{ color: "#60a5fa", fontSize: "14px", textTransform: "uppercase", letterSpacing: "2px", marginBottom: "12px" }}>
+          AI Notes &amp; Scheduling
+        </p>
+        <h1 style={{ fontSize: "64px", fontWeight: "800", margin: 0, lineHeight: 1 }}>
+          {greetingByHour()}
+        </h1>
+        <p style={{ color: "#64748b", fontSize: "18px", marginTop: "16px" }}>
+          {error
+            ? `Could not load dashboard — ${error}`
+            : "Manage meetings, deadlines, notes and documents from a single workspace."}
+        </p>
+      </motion.div>
 
-        <StatCard
-          title="Documents"
-          value="14"
-          subtitle="Uploaded recently"
-        />
-
-        <StatCard
-          title="Deadlines"
-          value="3"
-          subtitle="Need attention"
-        />
+      {/* Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "24px", marginBottom: "60px" }}>
+        {[
+          { title: "Events Today",         value: todayEvents.length,  subtitle: "Scheduled today",       delay: 0.2,  to: "/calendar" },
+          { title: "Open Tasks",           value: openTasks.length,    subtitle: "Need attention",        delay: 0.35, to: "/tasks" },
+          { title: "Pending Confirmations",value: pendingConf.length,  subtitle: "Awaiting your review",  delay: 0.5,  to: "/upload" },
+          { title: "Pending Replies",      value: pendingReply.length, subtitle: "Reply tasks due soon",  delay: 0.65, to: "/tasks" },
+        ].map(({ title, value, subtitle, delay, to }) => (
+          <motion.div
+            key={title}
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay, duration: 0.6 }}
+            whileHover={{ y: -4, scale: 1.02 }}
+            onClick={() => navigate(to)}
+            style={clickable}
+          >
+            <StatCard title={title} value={dash ? value : "…"} subtitle={subtitle} />
+          </motion.div>
+        ))}
       </div>
-    </motion.div>
 
-    <motion.div
-      initial={{ opacity: 0, y: 60 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      transition={{ duration: 0.8, delay: 0.2 }}
-      style={{
-        marginBottom: "120px",
-      }}
-    >
-      <h2 style={{ fontSize: "32px", marginBottom: "24px" }}>
-        Recent Activity
-      </h2>
-
+      {/* Today's schedule */}
       <div
         style={{
           background: "rgba(255,255,255,0.7)",
           backdropFilter: "blur(10px)",
           borderRadius: "24px",
           padding: "24px",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+          marginBottom: "40px",
         }}
       >
-        <p>✓ Uploaded Project Review Letter</p>
-        <p>✓ AI Extracted Meeting Details</p>
-        <p>✓ Created Calendar Event</p>
-        <p>✓ Added High Priority Task</p>
+        <h2 style={{ marginTop: 0, marginBottom: "24px" }}>Today's Schedule</h2>
+        {todayEvents.length === 0 ? (
+          <p style={{ color: "#94a3b8" }}>No events scheduled for today.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            {todayEvents.map((ev) => (
+              <motion.div
+                key={ev.id}
+                whileHover={{ x: 4 }}
+                onClick={() => navigate("/calendar")}
+                title="Open in Calendar"
+                style={{
+                  background: "rgba(255,255,255,0.6)",
+                  backdropFilter: "blur(10px)",
+                  padding: "20px",
+                  borderRadius: "18px",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.06)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <div>
+                  <h3 style={{ margin: 0, marginBottom: "6px" }}>{ev.title}</h3>
+                  {ev.venue && <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>{ev.venue}</p>}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  {ev.event_time && (
+                    <p style={{ margin: 0, color: "#2563eb", fontWeight: 600 }}>{fmtTime(ev.event_time)}</p>
+                  )}
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      background: ev.source === "manual" ? "#f0fdf4" : "#eff6ff",
+                      color: ev.source === "manual" ? "#16a34a" : "#2563eb",
+                      padding: "3px 10px",
+                      borderRadius: "99px",
+                    }}
+                  >
+                    {ev.source}
+                  </span>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </div>
-    </motion.div>
-  </>
-);
+
+      {/* Open tasks */}
+      {openTasks.length > 0 && (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.7)",
+            backdropFilter: "blur(10px)",
+            borderRadius: "24px",
+            padding: "24px",
+            marginBottom: "40px",
+          }}
+        >
+          <h2 style={{ marginTop: 0, marginBottom: "20px" }}>Open Tasks</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {openTasks.slice(0, 5).map((t) => (
+              <motion.div
+                key={t.id}
+                whileHover={{ x: 4 }}
+                onClick={() => navigate("/tasks")}
+                title="Open in Tasks"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 18px",
+                  borderRadius: "14px",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ fontWeight: 500 }}>{t.title}</span>
+                <span style={{ color: "#94a3b8", fontSize: "13px" }}>
+                  {t.due_date ? `Due ${fmtDate(t.due_date)}` : "No due date"}
+                </span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pending confirmations */}
+      {pendingConf.length > 0 && (
+        <div
+          style={{
+            background: "rgba(254,243,199,0.7)",
+            backdropFilter: "blur(10px)",
+            borderRadius: "24px",
+            padding: "24px",
+            marginBottom: "40px",
+            border: "1px solid #fde68a",
+          }}
+        >
+          <h2 style={{ marginTop: 0, marginBottom: "16px", color: "#92400e" }}>
+            Pending AI Extractions — Needs Review
+          </h2>
+          {pendingConf.map((item) => (
+            <motion.div
+              key={item.job_id}
+              whileHover={{ x: 4 }}
+              onClick={() => navigate("/upload")}
+              title="Review on Upload page"
+              style={{ color: "#78350f", fontSize: "14px", marginBottom: "8px", cursor: "pointer" }}
+            >
+              <strong>{item.filename}</strong> — uploaded {fmtDate(item.uploaded_at)}
+              {item.extraction_count > 0 && ` — ${item.extraction_count} item(s) to confirm`}
+            </motion.div>
+          ))}
+          <p style={{ color: "#92400e", fontSize: "13px", marginTop: "12px", marginBottom: 0 }}>
+            Go to <strong>Upload</strong> page to review and confirm.
+          </p>
+        </div>
+      )}
+
+      {/* Recent activity */}
+      <motion.div
+        initial={{ opacity: 0, y: 60 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.8 }}
+        style={{ marginBottom: "80px" }}
+      >
+        <h2 style={{ fontSize: "28px", marginBottom: "20px" }}>Recent Activity</h2>
+        <div
+          style={{
+            background: "rgba(255,255,255,0.7)",
+            backdropFilter: "blur(10px)",
+            borderRadius: "24px",
+            padding: "24px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
+          }}
+        >
+          {audit.length === 0 ? (
+            <p style={{ color: "#94a3b8" }}>No activity yet. Upload a document to get started.</p>
+          ) : (
+            audit.map((entry) => (
+              <p key={entry.id} style={{ margin: "0 0 10px", color: "#475569" }}>
+                <strong style={{ color: "#2563eb" }}>{entry.action}</strong>{" "}
+                {entry.entity_type} #{entry.entity_id}
+                {entry.detail ? ` — ${entry.detail}` : ""}
+                <span style={{ float: "right", color: "#94a3b8", fontSize: "12px" }}>
+                  {fmtDate(entry.created_at)}
+                </span>
+              </p>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </>
+  );
 }
 
 export default DashboardPage;

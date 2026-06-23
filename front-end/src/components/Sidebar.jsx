@@ -1,31 +1,33 @@
 import { Link, useLocation } from "react-router-dom";
 import {
-  FiHome,
-  FiUpload,
-  FiCalendar,
-  FiCheckSquare,
-  FiSearch,
+  FiHome, FiUpload, FiCalendar, FiCheckSquare,
+  FiSearch, FiFileText, FiClock, FiTrash2, FiList, FiActivity,
 } from "react-icons/fi";
 
 function Sidebar() {
   const location = useLocation();
 
   const navItems = [
-    { name: "Dashboard", path: "/dashboard", icon: <FiHome /> },
-    { name: "Upload", path: "/upload", icon: <FiUpload /> },
-    { name: "Calendar", path: "/calendar", icon: <FiCalendar /> },
-    { name: "Tasks", path: "/tasks", icon: <FiCheckSquare /> },
-    { name: "Search", path: "/search", icon: <FiSearch /> },
+    { name: "Dashboard",  path: "/dashboard", icon: <FiHome /> },
+    { name: "Upload",     path: "/upload",    icon: <FiUpload /> },
+    { name: "Calendar",   path: "/calendar",  icon: <FiCalendar /> },
+    { name: "Timeline",   path: "/timeline",  icon: <FiClock /> },
+    { name: "Tasks",      path: "/tasks",     icon: <FiCheckSquare /> },
+    { name: "Search",     path: "/search",    icon: <FiSearch /> },
+    { name: "Notes",      path: "/notes",     icon: <FiFileText /> },
+    { name: "Audit Log",  path: "/audit",     icon: <FiList /> },
+    { name: "Trash",      path: "/trash",     icon: <FiTrash2 /> },
+    { name: "Status",     path: "/status",    icon: <FiActivity /> },
   ];
 
   return (
     <div
       style={{
-        width: "280px",
+        width: "260px",
         minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
-        padding: "24px",
+        padding: "24px 16px",
         background: "rgba(255,255,255,0.75)",
         backdropFilter: "blur(20px)",
         borderRight: "1px solid rgba(0,0,0,0.08)",
@@ -33,61 +35,25 @@ function Sidebar() {
         top: 0,
       }}
     >
-      {/* Logo Area */}
-
-      <div
-        style={{
-          marginBottom: "40px",
-        }}
-      >
-        <h2
-          style={{
-            color: "#0f172a",
-            margin: 0,
-            fontSize: "30px",
-            fontWeight: "800",
-          }}
-        >
-          AI Notes
+      {/* Logo */}
+      <div style={{ marginBottom: "32px", paddingLeft: "8px" }}>
+        <h2 style={{ color: "#0f172a", margin: 0, fontSize: "20px", fontWeight: "800", lineHeight: 1.2 }}>
+          AI Notes and Scheduling
         </h2>
-
-        <p
-          style={{
-            color: "#64748b",
-            marginTop: "8px",
-            fontSize: "14px",
-          }}
-        >
-          Scheduling Workspace
-        </p>
-
-        <div
-          style={{
-            marginTop: "20px",
-            padding: "10px 14px",
-            borderRadius: "12px",
-            background: "#ecfdf5",
-            color: "#065f46",
-            fontSize: "13px",
-            fontWeight: "600",
-            width: "fit-content",
-          }}
-        >
-          ● System Online
+        <div style={{
+          marginTop: "12px", padding: "6px 12px", borderRadius: "8px",
+          background: "#ecfdf5", color: "#065f46",
+          fontSize: "12px", fontWeight: "600", width: "fit-content",
+        }}>
+          ● Dev Lan
         </div>
       </div>
 
       {/* Navigation */}
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-        }}
-      >
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         {navItems.map((item) => {
-          const active = location.pathname === item.path;
+          const active = location.pathname === item.path ||
+            (item.path === "/dashboard" && location.pathname === "/");
 
           return (
             <Link
@@ -96,79 +62,41 @@ function Sidebar() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "14px",
-                padding: "14px 18px",
-                borderRadius: "14px",
+                gap: "12px",
+                padding: "11px 14px",
+                borderRadius: "12px",
                 textDecoration: "none",
-
                 color: active ? "white" : "#475569",
-
                 background: active
                   ? "linear-gradient(135deg, #2563eb, #3b82f6)"
                   : "transparent",
-
-                boxShadow: active
-                  ? "0 10px 25px rgba(37,99,235,0.35)"
-                  : "none",
-
-                transform: active
-                  ? "translateX(6px)"
-                  : "translateX(0)",
-
-                transition: "all 0.3s ease",
-
+                boxShadow: active ? "0 6px 20px rgba(37,99,235,0.35)" : "none",
+                transform: active ? "translateX(4px)" : "translateX(0)",
+                transition: "all 0.25s ease",
                 fontWeight: active ? "600" : "500",
+                fontSize: "14px",
               }}
             >
-              <span
-                style={{
-                  fontSize: "18px",
-                }}
-              >
-                {item.icon}
-              </span>
-
+              <span style={{ fontSize: "16px" }}>{item.icon}</span>
               {item.name}
             </Link>
           );
         })}
       </div>
 
-      {/* Bottom User Card */}
-
-      <div
-        style={{
-          marginTop: "auto",
-          paddingTop: "30px",
-        }}
-      >
-        <div
-          style={{
-            background: "rgba(255,255,255,0.85)",
-            backdropFilter: "blur(10px)",
-            borderRadius: "18px",
-            padding: "18px",
-            border: "1px solid rgba(0,0,0,0.06)",
-            boxShadow: "0 10px 25px rgba(0,0,0,0.05)",
-          }}
-        >
-          <strong
-            style={{
-              color: "#0f172a",
-            }}
-          >
-            Admin User
-          </strong>
-
-          <p
-            style={{
-              color: "#64748b",
-              marginTop: "8px",
-              marginBottom: 0,
-              fontSize: "13px",
-            }}
-          >
-            AI Notes Workspace
+      {/* Bottom user card */}
+      <div style={{ marginTop: "auto", paddingTop: "24px" }}>
+        <div style={{
+          background: "rgba(255,255,255,0.85)",
+          backdropFilter: "blur(10px)",
+          borderRadius: "14px",
+          padding: "14px 16px",
+          border: "1px solid rgba(0,0,0,0.06)",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.05)",
+        }}>
+          <strong style={{ color: "#0f172a", fontSize: "14px" }}>AI Notes and Scheduling</strong>
+          <p style={{ color: "#64748b", marginTop: "4px", marginBottom: 0, fontSize: "12px" }}>
+            Private · runs entirely on Dev Lan
           </p>
         </div>
       </div>

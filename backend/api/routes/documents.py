@@ -1,10 +1,40 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 import hashlib
 import os
 from api.config import UPLOAD_DIR, MAX_SIZE, ALLOWED_DOCS
 from api.db import get_db
 
 router = APIRouter(tags=["Documents"])
+
+_MIME = {
+    "pdf":  "application/pdf",
+    "jpg":  "image/jpeg",
+    "png":  "image/png",
+    "tiff": "image/tiff",
+}
+
+
+@router.get("/documents/{doc_id}/download")
+def download_document(doc_id: int):
+    """FR-27 — open/download the original uploaded document (the record)."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT filename, file_path, file_type FROM documents WHERE id = %s", (doc_id,))
+        doc = cur.fetchone()
+        if not doc:
+            raise HTTPException(404, "Document not found.")
+        if not os.path.exists(doc["file_path"]):
+            raise HTTPException(410, "Original file is no longer on disk.")
+        return FileResponse(
+            doc["file_path"],
+            media_type=_MIME.get(doc["file_type"], "application/octet-stream"),
+            filename=doc["filename"],
+        )
+    finally:
+        cur.close()
+        conn.close()
 
 
 @router.post("/upload")

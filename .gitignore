@@ -27,3 +27,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Offline bundle artifacts (downloaded/transferred, not source)
+offline/wheels/
+offline/installers/
+*.tar
+front-end/dist/

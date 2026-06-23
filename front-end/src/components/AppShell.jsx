@@ -1,5 +1,7 @@
 import Sidebar from "./Sidebar";
 import BackgroundBlobs from "./BackgroundBlobs";
+import NotificationManager from "./NotificationManager";
+import BackendStatus from "./BackendStatus";
 
 function AppShell({ children }) {
   return (
@@ -14,6 +16,8 @@ function AppShell({ children }) {
       }}
     >
       <BackgroundBlobs />
+      <NotificationManager />
+      <BackendStatus />
 
       <Sidebar />
 

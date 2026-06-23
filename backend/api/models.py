@@ -13,7 +13,13 @@ class ManualEvent(BaseModel):
     reply_by   : Optional[str] = ""
     priority   : Optional[str] = "Medium"  # Low / Medium / High / Critical
     category   : Optional[str] = "General" # Meeting / Reply / Review / Personal
+    classification : Optional[str] = None
     reminders  : Optional[List[str]] = ["1day", "1hour", "15min"]
+    # FR-20 recurrence (optional)
+    recurrence : Optional[str] = None       # daily / weekly / monthly / yearly
+    interval   : Optional[int] = 1
+    end_date   : Optional[str] = None        # DD MMM YYYY or YYYY-MM-DD
+    end_count  : Optional[int] = None        # number of occurrences
 
 
 class ConfirmItem(BaseModel):
