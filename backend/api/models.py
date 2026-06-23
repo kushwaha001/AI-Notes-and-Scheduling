@@ -17,7 +17,7 @@ class ManualEvent(BaseModel):
 
 
 class ConfirmItem(BaseModel):
-    job_id     : str
+    job_id     : int
     item_index : int
     title      : str
     event_date : Optional[str] = ""
@@ -27,6 +27,7 @@ class ConfirmItem(BaseModel):
     ref_number : Optional[str] = ""
     deadline   : Optional[str] = ""
     reply_by   : Optional[str] = ""
+    due_date   : Optional[str] = ""
     reminders  : Optional[List[str]] = ["1day", "1hour", "15min"]
     item_type  : Optional[str] = "event"    # "event" or "task"
     priority   : Optional[str] = "Medium"
@@ -34,7 +35,7 @@ class ConfirmItem(BaseModel):
 
 
 class DismissItem(BaseModel):
-    job_id     : str
+    job_id     : int
     item_index : int
 
 
