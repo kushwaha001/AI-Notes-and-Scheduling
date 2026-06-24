@@ -123,6 +123,9 @@ export default function CalendarPage() {
   // event detail popup
   const [detailEventId, setDetailEventId] = useState(null);
 
+  // delete confirmation modal
+  const [deleteTarget, setDeleteTarget] = useState(null); // { id, title, isRecurring }
+
   useEffect(() => {
     getEvents().then(setAllEvents).catch(() => {});
     getTasks({}).then(setAllTasks).catch(() => {});
@@ -218,11 +221,22 @@ export default function CalendarPage() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!window.confirm("Move event to trash? You can restore it later.")) return;
-    await deleteEvent(id).catch((e) => alert(e.message));
-    setRefreshKey((k) => k + 1);
-    setSelectedDayEvents(null);
+  // Opens the in-app delete confirmation modal
+  function handleDelete(id) {
+    const ev = allEvents.find((e) => e.id === id);
+    setDeleteTarget({ id, title: ev?.title || "", isRecurring: ev?.recurrence_id != null });
+  }
+
+  async function performDelete(scope) {
+    if (!deleteTarget) return;
+    try {
+      await deleteEvent(deleteTarget.id, scope);
+      setDeleteTarget(null);
+      setRefreshKey((k) => k + 1);
+      setSelectedDayEvents(null);
+    } catch (e) {
+      alert(e.message);
+    }
   }
 
   function handleDayClick(dateStr) {
@@ -619,6 +633,69 @@ export default function CalendarPage() {
         <p style={{ color: "#94a3b8", fontSize: "13px", marginTop: "12px" }}>
           {counts.events} events · {counts.tasks} tasks shown
         </p>
+      )}
+
+      {/* Delete confirmation modal (in-app, not a browser confirm) */}
+      {deleteTarget && (
+        <div
+          onClick={() => setDeleteTarget(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1100,
+            background: "rgba(15,23,42,0.5)", backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: "20px",
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "white", borderRadius: "18px", padding: "26px",
+              width: "100%", maxWidth: "440px", boxShadow: "0 30px 80px rgba(0,0,0,0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 10px", fontSize: "20px" }}>
+              {deleteTarget.isRecurring ? "Delete repeating event" : "Move to trash"}
+            </h3>
+            <p style={{ margin: "0 0 22px", color: "#475569", fontSize: "14px" }}>
+              {deleteTarget.isRecurring ? (
+                <>
+                  <strong>{deleteTarget.title}</strong> repeats. Delete just this
+                  occurrence, or the entire series? You can restore items from Trash.
+                </>
+              ) : (
+                <>
+                  Move <strong>{deleteTarget.title}</strong> to trash? You can restore
+                  it later.
+                </>
+              )}
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {deleteTarget.isRecurring ? (
+                <>
+                  <button onClick={() => performDelete("occurrence")}
+                    style={{ background: "#f1f5f9", color: "#0f172a", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
+                    Delete this occurrence only
+                  </button>
+                  <button onClick={() => performDelete("series")}
+                    style={{ background: "#ef4444", color: "white", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
+                    Delete entire series
+                  </button>
+                </>
+              ) : (
+                <button onClick={() => performDelete("occurrence")}
+                  style={{ background: "#ef4444", color: "white", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
+                  Delete
+                </button>
+              )}
+              <button onClick={() => setDeleteTarget(null)}
+                style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "12px", borderRadius: "10px", cursor: "pointer", fontSize: "14px" }}>
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        </div>
       )}
 
       {/* edit / reschedule modal */}

@@ -30,7 +30,10 @@ Thumbs.db
 
 # Offline bundle artifacts (downloaded/transferred, not source)
 offline/wheels/
+offline/wheels-gpu/
 offline/installers/
+offline/*.zip
+offline/*.log
 *.tar
 front-end/dist/
 
@@ -40,3 +43,6 @@ cloudflared.exe
 PROJECT_GUIDE.md
 SHARING.md
 share-with-tunnel.bat
+
+# Personal learning documents (not part of the codebase)
+*.docx

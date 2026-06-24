@@ -35,7 +35,7 @@ PC and served by Python's own standard library.
 | Python backend (FastAPI) | No | Installed from copied `.whl` files |
 | React frontend | No | Pre-built on internet PC, served by Python |
 
-Files in this `offline/` folder that you'll use:
+Helper files in the `offline/` folder that you'll use:
 - `1-fetch-on-internet-pc.bat` — automates downloading wheels + building the UI
 - `2-install-on-offline-pc.bat` — automates creating the venv + installing wheels
 - `3-run.bat` — starts the backend and the frontend together
@@ -115,7 +115,7 @@ e.g. to `C:\AI-Notes-and-Scheduling`.
 2. Run the **PostgreSQL** installer — **write down the password** you set for the
    `postgres` user; you'll need it in C3. Keep the default port `5432`.
 
-Verify Python is on PATH (open a new terminal):
+Verify Python is on PATH (open a **new** terminal):
 ```powershell
 python --version        # should print Python 3.11.x
 ```

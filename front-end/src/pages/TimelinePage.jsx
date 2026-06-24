@@ -10,6 +10,23 @@ const KIND_STYLE = {
   note:  { color: "#7c3aed", bg: "#faf5ff", icon: "📝", label: "Note"  },
 };
 
+const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+
+function dayLabel(dateKey) {
+  if (dateKey === "Undated") return { main: "Undated", sub: "" };
+  const d = new Date(`${dateKey}T00:00:00`);
+  if (isNaN(d)) return { main: dateKey, sub: "" };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((d - today) / 86400000);
+  let rel = "";
+  if (diff === 0) rel = "Today";
+  else if (diff === 1) rel = "Tomorrow";
+  else if (diff === -1) rel = "Yesterday";
+  else if (diff > 1) rel = `In ${diff} days`;
+  else rel = `${-diff} days ago`;
+  return { main: fmtDate(dateKey), sub: `${WEEKDAYS[d.getDay()]} · ${rel}` };
+}
+
 export default function TimelinePage() {
   const [items, setItems]     = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +39,13 @@ export default function TimelinePage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const counts = {
+    all:   items.length,
+    event: items.filter((i) => i.kind === "event").length,
+    task:  items.filter((i) => i.kind === "task").length,
+    note:  items.filter((i) => i.kind === "note").length,
+  };
 
   const filtered = filter === "all" ? items : items.filter((i) => i.kind === filter);
 
@@ -47,24 +71,38 @@ export default function TimelinePage() {
         </p>
         <h1 style={{ margin: 0, fontSize: "42px" }}>Timeline</h1>
         <p style={{ color: "#64748b", marginTop: "10px" }}>
-          Events, tasks and notes in one chronological view. Click any item to open its source.
+          Events, tasks and notes in one chronological view. Repeating events are
+          shown once. Click any item to open its source.
         </p>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
-        {["all", "event", "task", "note"].map((f) => (
+      {/* Filters with counts */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "28px", flexWrap: "wrap" }}>
+        {[
+          { key: "all",   label: "All" },
+          { key: "event", label: "Events" },
+          { key: "task",  label: "Tasks" },
+          { key: "note",  label: "Notes" },
+        ].map((f) => (
           <button
-            key={f}
-            onClick={() => setFilter(f)}
+            key={f.key}
+            onClick={() => setFilter(f.key)}
             style={{
               padding: "8px 18px", borderRadius: "10px", border: "none",
-              background: filter === f ? "#2563eb" : "#f1f5f9",
-              color: filter === f ? "white" : "#475569",
-              fontWeight: 600, cursor: "pointer", fontSize: "14px", textTransform: "capitalize",
+              background: filter === f.key ? "#2563eb" : "#f1f5f9",
+              color: filter === f.key ? "white" : "#475569",
+              fontWeight: 600, cursor: "pointer", fontSize: "14px",
+              display: "flex", alignItems: "center", gap: "8px",
             }}
           >
-            {f === "all" ? "All" : `${f}s`}
+            {f.label}
+            <span style={{
+              background: filter === f.key ? "rgba(255,255,255,0.25)" : "#e2e8f0",
+              color: filter === f.key ? "white" : "#64748b",
+              borderRadius: "99px", padding: "1px 8px", fontSize: "12px",
+            }}>
+              {counts[f.key]}
+            </span>
           </button>
         ))}
       </div>
@@ -76,58 +114,90 @@ export default function TimelinePage() {
         </div>
       )}
 
-      {sortedKeys.map((dateKey) => (
-        <div key={dateKey} style={{ marginBottom: "28px" }}>
-          <h3 style={{
-            margin: "0 0 14px", color: "#475569",
-            fontSize: "15px", position: "sticky", top: 0,
-          }}>
-            {dateKey === "Undated" ? "Undated" : fmtDate(dateKey)}
-          </h3>
+      {sortedKeys.map((dateKey) => {
+        const { main, sub } = dayLabel(dateKey);
+        return (
+          <div key={dateKey} style={{ marginBottom: "26px" }}>
+            {/* Date header */}
+            <div style={{
+              display: "flex", alignItems: "baseline", gap: "10px",
+              marginBottom: "14px", paddingBottom: "8px",
+              borderBottom: "1px solid #e2e8f0",
+            }}>
+              <h3 style={{ margin: 0, color: "#0f172a", fontSize: "17px", fontWeight: 700 }}>{main}</h3>
+              {sub && <span style={{ color: "#94a3b8", fontSize: "13px" }}>{sub}</span>}
+            </div>
 
-          <div style={{ borderLeft: "2px solid #e2e8f0", paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            {groups[dateKey].map((item) => {
-              const s = KIND_STYLE[item.kind] || KIND_STYLE.note;
-              return (
-                <motion.div
-                  key={`${item.kind}-${item.id}`}
-                  whileHover={{ x: 4 }}
-                  onClick={() => goToSource(item)}
-                  style={{
-                    background: "white", borderRadius: "14px",
-                    padding: "14px 18px", boxShadow: "0 4px 16px rgba(0,0,0,0.05)",
-                    cursor: "pointer", position: "relative",
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                  }}
-                >
-                  {/* timeline dot */}
-                  <span style={{
-                    position: "absolute", left: "-29px", top: "50%", transform: "translateY(-50%)",
-                    width: "14px", height: "14px", borderRadius: "50%",
-                    background: s.color, border: "3px solid white",
-                  }} />
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span style={{ fontSize: "18px" }}>{s.icon}</span>
-                    <div>
-                      <strong>{item.title}</strong>
-                      <p style={{ margin: "3px 0 0", color: "#94a3b8", fontSize: "13px" }}>
-                        {item.subtitle}{item.time ? ` · ${String(item.time).slice(0,5)}` : ""}
-                      </p>
+            <div style={{ borderLeft: "2px solid #e2e8f0", paddingLeft: "22px", display: "flex", flexDirection: "column", gap: "10px" }}>
+              {groups[dateKey].map((item) => {
+                const s = KIND_STYLE[item.kind] || KIND_STYLE.note;
+                return (
+                  <motion.div
+                    key={`${item.kind}-${item.id}`}
+                    whileHover={{ x: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.10)" }}
+                    onClick={() => goToSource(item)}
+                    style={{
+                      background: "white", borderRadius: "14px",
+                      padding: "14px 18px", boxShadow: "0 4px 16px rgba(0,0,0,0.05)",
+                      cursor: "pointer", position: "relative",
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      borderLeft: `4px solid ${s.color}`,
+                    }}
+                  >
+                    {/* timeline dot */}
+                    <span style={{
+                      position: "absolute", left: "-30px", top: "50%", transform: "translateY(-50%)",
+                      width: "13px", height: "13px", borderRadius: "50%",
+                      background: s.color, border: "3px solid white",
+                      boxShadow: "0 0 0 1px #e2e8f0",
+                    }} />
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                      <span style={{ fontSize: "18px" }}>{s.icon}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <strong style={{ fontSize: "15px" }}>{item.title}</strong>
+                          {item.recurring && (
+                            <span style={{
+                              background: "#fef9c3", color: "#854d0e",
+                              fontSize: "11px", fontWeight: 600,
+                              padding: "1px 8px", borderRadius: "99px",
+                            }}>
+                              🔁 repeats · {item.occurrences}×
+                            </span>
+                          )}
+                          {item.classification && item.classification !== "General" && (
+                            <span style={{
+                              background: "#faf5ff", color: "#7c3aed",
+                              fontSize: "11px", fontWeight: 600,
+                              padding: "1px 8px", borderRadius: "99px",
+                            }}>
+                              {item.classification}
+                            </span>
+                          )}
+                        </div>
+                        {(item.subtitle || item.time) && (
+                          <p style={{ margin: "3px 0 0", color: "#94a3b8", fontSize: "13px" }}>
+                            {item.subtitle}
+                            {item.subtitle && item.time ? " · " : ""}
+                            {item.time ? String(item.time).slice(0, 5) : ""}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <span style={{
-                    background: s.bg, color: s.color,
-                    padding: "3px 12px", borderRadius: "99px",
-                    fontSize: "12px", fontWeight: 600,
-                  }}>
-                    {s.label}
-                  </span>
-                </motion.div>
-              );
-            })}
+                    <span style={{
+                      background: s.bg, color: s.color,
+                      padding: "3px 12px", borderRadius: "99px",
+                      fontSize: "12px", fontWeight: 600, whiteSpace: "nowrap",
+                    }}>
+                      {s.label}
+                    </span>
+                  </motion.div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 }

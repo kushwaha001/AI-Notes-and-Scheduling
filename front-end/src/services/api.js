@@ -39,7 +39,8 @@ export const getEvents = (params = {}) => {
 export const getEvent    = (id) => req("GET", `/events/${id}`);
 export const createEvent = (data) => req("POST", "/events/manual", data);
 export const updateEvent = (id, data) => req("PATCH", `/events/${id}`, data);
-export const deleteEvent = (id) => req("DELETE", `/events/${id}`);
+export const deleteEvent = (id, scope = "occurrence") =>
+  req("DELETE", `/events/${id}?scope=${scope}`);
 
 // ── Tasks ─────────────────────────────────────────────────────
 export const getTasks = (params = {}) => {

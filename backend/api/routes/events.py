@@ -288,11 +288,38 @@ def update_event(event_id: int, update: EventUpdate):
 
 
 @router.delete("/events/{event_id}")
-def delete_event(event_id: int):
-    """FR-16 — soft delete, keeps audit trail."""
+def delete_event(event_id: int, scope: str = "occurrence"):
+    """FR-16/FR-20 — soft delete. scope='occurrence' trashes just this event;
+    scope='series' trashes the whole recurring series it belongs to."""
     conn = get_db()
     cur = conn.cursor()
     try:
+        if scope == "series":
+            cur.execute("SELECT recurrence_id FROM events WHERE id = %s", (event_id,))
+            row = cur.fetchone()
+            rec_id = row["recurrence_id"] if row else None
+            if rec_id is not None:
+                cur.execute("""
+                    UPDATE events SET status = 'trashed', deleted_at = NOW()
+                    WHERE recurrence_id = %s AND status != 'trashed'
+                    RETURNING id
+                """, (rec_id,))
+                trashed = [r["id"] for r in cur.fetchall()]
+            else:
+                # not actually recurring — fall back to single delete
+                cur.execute("""
+                    UPDATE events SET status = 'trashed', deleted_at = NOW()
+                    WHERE id = %s AND status != 'trashed' RETURNING id
+                """, (event_id,))
+                trashed = [r["id"] for r in cur.fetchall()]
+            cur.execute("""
+                INSERT INTO audit_log (action, entity_type, entity_id, detail)
+                VALUES ('trashed', 'event', %s, %s)
+            """, (event_id, f"Soft deleted recurring series ({len(trashed)} occurrences)"))
+            conn.commit()
+            return {"status": "deleted", "scope": "series", "trashed_count": len(trashed)}
+
+        # single occurrence
         cur.execute("""
             UPDATE events SET status = 'trashed', deleted_at = NOW()
             WHERE id = %s AND status != 'trashed'
@@ -302,7 +329,7 @@ def delete_event(event_id: int):
             VALUES ('trashed', 'event', %s, 'Soft deleted by user')
         """, (event_id,))
         conn.commit()
-        return {"status": "deleted", "event_id": event_id}
+        return {"status": "deleted", "scope": "occurrence", "event_id": event_id}
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))
