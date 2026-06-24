@@ -75,7 +75,7 @@ export default function NotesPage() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm("Move note to trash? (FR-19 — restorable)")) return;
+    if (!window.confirm("Move note to trash? You can restore it later.")) return;
     await deleteNote(id).catch((e) => alert(e.message));
     if (selected?.note_id === id) { setSelected(null); setEditContent(""); setEditTitle(""); }
     loadList();
@@ -113,7 +113,7 @@ export default function NotesPage() {
     <>
       <div style={{ marginBottom: "24px" }}>
         <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
-          Notes (FR-5, FR-38, FR-39)
+          Notes
         </p>
         <h1 style={{ margin: 0, fontSize: "42px" }}>Notes</h1>
         <p style={{ color: "#64748b", marginTop: "10px" }}>
@@ -258,7 +258,7 @@ export default function NotesPage() {
 
             {/* FR-36 — classification tag */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
-              <label style={{ fontSize: "13px", color: "#64748b" }}>Classification (FR-36):</label>
+              <label style={{ fontSize: "13px", color: "#64748b" }}>Classification:</label>
               <select value={editClass} onChange={(e) => setEditClass(e.target.value)}
                 style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px" }}>
                 {CLASSIFICATIONS.map((c) => <option key={c}>{c}</option>)}
@@ -285,19 +285,11 @@ export default function NotesPage() {
               }}
             />
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px" }}>
+            <div style={{ marginTop: "10px" }}>
               <p style={{ color: "#94a3b8", fontSize: "12px", margin: 0 }}>
-                Stored as Markdown on server · {selected.note_id}.md
+                Stored as Markdown on server · note #{selected.note_id} ·
+                use <strong>History</strong> to view or restore earlier versions
               </p>
-              <button
-                onClick={handleSave}
-                style={{
-                  background: "#10b981", color: "white", border: "none",
-                  padding: "8px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: 600, fontSize: "13px",
-                }}
-              >
-                Save (Ctrl+S)
-              </button>
             </div>
           </motion.div>
         ) : (
@@ -330,7 +322,7 @@ export default function NotesPage() {
             onClick={(e) => e.stopPropagation()}
             style={{ background: "white", borderRadius: "20px", padding: "24px", width: "100%", maxWidth: "620px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ margin: 0 }}>Version History (FR-39)</h3>
+              <h3 style={{ margin: 0 }}>Version History</h3>
               <button onClick={() => { setVersions(null); setViewVersion(null); }}
                 style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "20px" }}>×</button>
             </div>

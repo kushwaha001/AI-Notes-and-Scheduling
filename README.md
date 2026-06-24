@@ -379,9 +379,9 @@ Note: AI summary of results deferred to v1.1
 
 | Name | Role | Branch |
 |------|------|--------|
-| Jahnavi Rajpoot | Backend, Infrastructure,CRUD APIs  | `feature/api-core`, `feature/calendar-view`|
+| Jahnavi Rajpoot | Database, Infrastructure,CRUD APIs  | `feature/api-core`, `feature/calendar-view`|
 | Khushagr | Frontend, UI/UX | `feature/frontend-shell`, `feature/confirm-screen` |
-|  Kanishk Kushwaha | Database, Vision LLM | `feature/database-schema`,  `feature/vision-extraction` |
+|  Kanishk Kushwaha | Backend,Infrastructure,CRUD APIs  | `feature/database-schema`,  `feature/vision-extraction` |
 
 ---
 

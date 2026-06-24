@@ -6,44 +6,54 @@ import {
 } from "@schedule-x/calendar";
 import "@schedule-x/theme-default/dist/index.css";
 import { useState, useEffect } from "react";
-import { getEvents } from "../services/api";
+import { getEvents, getTasks } from "../services/api";
 
-// Temporal is available globally via temporal-polyfill/global (main.jsx)
-function plainDate(dateStr) {
-  return Temporal.PlainDate.from(dateStr);
-}
+// Two colour-coded "calendars": events (blue) and tasks (green)
+const CALENDARS = {
+  event: {
+    colorName: "event",
+    lightColors: { main: "#2563eb", container: "#dbeafe", onContainer: "#1e3a8a" },
+    darkColors:  { main: "#93c5fd", container: "#1e3a8a", onContainer: "#dbeafe" },
+  },
+  task: {
+    colorName: "task",
+    lightColors: { main: "#16a34a", container: "#dcfce7", onContainer: "#14532d" },
+    darkColors:  { main: "#86efac", container: "#14532d", onContainer: "#dcfce7" },
+  },
+};
 
-function toSXEvent(e) {
+function eventToSX(e) {
   if (!e.event_date) return null;
-  const dateStr = String(e.event_date).split("T")[0]; // "YYYY-MM-DD"
-
-  // Timed event → ZonedDateTime (needed by week/day views)
+  const dateStr = String(e.event_date).split("T")[0];
   if (e.event_time) {
     try {
-      const timeStr = String(e.event_time).slice(0, 5); // "HH:MM"
+      const time = String(e.event_time).slice(0, 5);
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      const start = Temporal.ZonedDateTime.from(`${dateStr}T${timeStr}:00[${tz}]`);
-      const end = start.add({ hours: 1 });
-      return { id: String(e.id), title: e.title, start, end };
-    } catch {
-      /* fall through to all-day so the event still shows */
-    }
+      const start = Temporal.ZonedDateTime.from(`${dateStr}T${time}:00[${tz}]`);
+      return { id: `event-${e.id}`, title: e.title, start, end: start.add({ hours: 1 }), calendarId: "event" };
+    } catch { /* fall back to all-day */ }
   }
-
-  // All-day event → PlainDate
   try {
-    const d = plainDate(dateStr);
-    return { id: String(e.id), title: e.title, start: d, end: d };
-  } catch {
-    return null;
-  }
+    const d = Temporal.PlainDate.from(dateStr);
+    return { id: `event-${e.id}`, title: e.title, start: d, end: d, calendarId: "event" };
+  } catch { return null; }
 }
 
-function InnerCalendar({ events, onEventClick }) {
+function taskToSX(t) {
+  if (!t.due_date) return null;  // tasks without a due date don't appear on the calendar
+  try {
+    const d = Temporal.PlainDate.from(String(t.due_date).split("T")[0]);
+    return { id: `task-${t.id}`, title: `📋 ${t.title}`, start: d, end: d, calendarId: "task" };
+  } catch { return null; }
+}
+
+function InnerCalendar({ events, onEventClick, view }) {
   const calendar = useCalendarApp({
     views       : [createViewMonthGrid(), createViewWeek(), createViewDay()],
-    defaultView : "month-grid",
+    defaultView : view || "month-grid",
     selectedDate: Temporal.Now.plainDateISO(),
+    locale      : "en-GB",   // day-first date formatting (DD/MM/YYYY)
+    calendars   : CALENDARS,
     events,
     callbacks: {
       onEventClick(calendarEvent) {
@@ -52,6 +62,13 @@ function InnerCalendar({ events, onEventClick }) {
     },
   });
 
+  // Switch the schedule-x view when the page's view switcher changes
+  useEffect(() => {
+    if (view && calendar?.calendarControls?.setView) {
+      calendar.calendarControls.setView(view);
+    }
+  }, [view]);
+
   return (
     <div style={{ borderRadius: "16px", overflow: "hidden" }}>
       <ScheduleXCalendar calendarApp={calendar} />
@@ -59,7 +76,7 @@ function InnerCalendar({ events, onEventClick }) {
   );
 }
 
-export default function CalendarContainer({ onEventCount, refreshKey, onEventClick }) {
+export default function CalendarContainer({ onCounts, refreshKey, onEventClick, view }) {
   const [sxEvents, setSxEvents] = useState([]);
   const [loaded, setLoaded]     = useState(false);
   const [error, setError]       = useState("");
@@ -67,11 +84,12 @@ export default function CalendarContainer({ onEventCount, refreshKey, onEventCli
   useEffect(() => {
     setLoaded(false);
     setError("");
-    getEvents()
-      .then((events) => {
-        const mapped = events.map(toSXEvent).filter(Boolean);
-        setSxEvents(mapped);
-        if (onEventCount) onEventCount(mapped.length);
+    Promise.all([getEvents(), getTasks({})])
+      .then(([events, tasks]) => {
+        const mappedEvents = events.map(eventToSX).filter(Boolean);
+        const mappedTasks  = tasks.map(taskToSX).filter(Boolean);
+        setSxEvents([...mappedEvents, ...mappedTasks]);
+        if (onCounts) onCounts({ events: mappedEvents.length, tasks: mappedTasks.length });
       })
       .catch((e) => {
         setError(
@@ -84,19 +102,11 @@ export default function CalendarContainer({ onEventCount, refreshKey, onEventCli
   }, [refreshKey]);
 
   if (!loaded) {
-    return (
-      <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
-        Loading calendar…
-      </div>
-    );
+    return <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>Loading calendar…</div>;
   }
-
   if (error) {
     return (
-      <div style={{
-        padding: "30px", borderRadius: "16px",
-        background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c",
-      }}>
+      <div style={{ padding: "30px", borderRadius: "16px", background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c" }}>
         <strong>Calendar could not load.</strong>
         <p style={{ margin: "8px 0 0", fontSize: "14px" }}>{error}</p>
       </div>
@@ -108,6 +118,7 @@ export default function CalendarContainer({ onEventCount, refreshKey, onEventCli
       key={sxEvents.map((e) => e.id).join(",")}
       events={sxEvents}
       onEventClick={onEventClick}
+      view={view}
     />
   );
 }

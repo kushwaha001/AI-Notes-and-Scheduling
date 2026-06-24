@@ -86,7 +86,7 @@ export default function NotificationManager() {
         Enable event reminders?
       </p>
       <p style={{ margin: "0 0 12px", fontSize: "12px", color: "#64748b" }}>
-        Get a browser notification before your meetings (FR-37).
+        Get a browser notification before your meetings.
       </p>
       <div style={{ display: "flex", gap: "8px" }}>
         <button

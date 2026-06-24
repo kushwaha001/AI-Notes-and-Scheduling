@@ -8,7 +8,8 @@ from api.db import get_db
 
 router = APIRouter(tags=["Events"])
 
-MAX_OCCURRENCES = 365  # safety cap for recurrence generation
+MAX_OCCURRENCES = 365         # hard safety cap for recurrence generation
+DEFAULT_OCCURRENCES = 12      # used when a recurrence has no end date or count
 
 
 def _parse_date(s):
@@ -185,20 +186,26 @@ def create_event_manual(event: ManualEvent):
 
         # FR-20 — recurring series
         if event.recurrence in ("daily", "weekly", "monthly", "yearly"):
+            rec_end_date  = _parse_date(event.end_date) if event.end_date else None
+            rec_end_count = event.end_count or None
+            # Guard: an open-ended recurrence (no end date and no count) would
+            # otherwise generate up to MAX_OCCURRENCES rows. Cap it sensibly.
+            if not rec_end_date and not rec_end_count:
+                rec_end_count = DEFAULT_OCCURRENCES
+
             cur.execute("""
                 INSERT INTO event_recurrence (frequency, interval, end_date, end_count)
                 VALUES (%s, %s, %s, %s) RETURNING id
             """, (
                 event.recurrence,
                 max(1, event.interval or 1),
-                _parse_date(event.end_date) if event.end_date else None,
-                event.end_count or None,
+                rec_end_date,
+                rec_end_count,
             ))
             recurrence_id = cur.fetchone()["id"]
             dates = _occurrence_dates(
                 start, event.recurrence, event.interval or 1,
-                _parse_date(event.end_date) if event.end_date else None,
-                event.end_count,
+                rec_end_date, rec_end_count,
             )
 
         first_id = None

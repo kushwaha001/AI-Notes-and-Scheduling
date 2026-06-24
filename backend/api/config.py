@@ -17,6 +17,7 @@ os.makedirs(NOTES_DIR,  exist_ok=True)
 # ── File limits ───────────────────────────────────────────────
 MAX_SIZE  = 50 * 1024 * 1024   # 50 MB
 MAX_AUDIO = 5 * 60             # 5 min in seconds
+MAX_BATCH = int(os.getenv("MAX_BATCH", "20"))   # max files queued at once (FR-1, configurable)
 
 ALLOWED_DOCS  = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
 ALLOWED_AUDIO = {".wav", ".mp3", ".m4a", ".ogg"}

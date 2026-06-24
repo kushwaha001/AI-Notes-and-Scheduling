@@ -50,7 +50,7 @@ export default function AuditLogPage() {
       <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
-            Audit Trail (FR-28)
+            Audit Trail
           </p>
           <h1 style={{ margin: 0, fontSize: "42px" }}>Audit Log</h1>
           <p style={{ color: "#64748b", marginTop: "10px" }}>

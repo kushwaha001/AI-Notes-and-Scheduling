@@ -76,7 +76,7 @@ export default function SystemStatusPage() {
       <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
           <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
-            System Administration (FR-41)
+            System Administration
           </p>
           <h1 style={{ margin: 0, fontSize: "42px" }}>System Status</h1>
         </div>
@@ -105,7 +105,7 @@ export default function SystemStatusPage() {
       )}
 
       {/* Processing queue */}
-      <h2 style={{ marginBottom: "14px" }}>Processing Queue (FR-2, NFR-6)</h2>
+      <h2 style={{ marginBottom: "14px" }}>Processing Queue</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "24px" }}>
         {[
           { label: "Waiting",           key: "waiting",          bg: "#fff7ed", color: "#c2410c" },
@@ -148,7 +148,7 @@ export default function SystemStatusPage() {
       )}
 
       {/* Audit trail */}
-      <h2 style={{ marginBottom: "14px" }}>Audit Trail (FR-28)</h2>
+      <h2 style={{ marginBottom: "14px" }}>Audit Trail</h2>
       <div style={{ background: "white", borderRadius: "18px", padding: "20px", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}>
         {audit.length === 0 ? (
           <p style={{ color: "#94a3b8" }}>No audit entries yet.</p>

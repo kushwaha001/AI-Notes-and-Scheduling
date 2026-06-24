@@ -37,7 +37,7 @@ export default function UploadPage() {
   function onFilesPicked(fileList) {
     const files = Array.from(fileList);
     if (files.length > 20) {
-      alert("FR-1: maximum 20 files per batch.");
+      alert("Maximum 20 files per batch.");
       return;
     }
     setQueue(files.map((f) => ({ file: f, name: f.name, size: f.size, status: "queued", message: "" })));
@@ -78,7 +78,7 @@ export default function UploadPage() {
   }
 
   async function handleDeleteDoc(id) {
-    if (!window.confirm("Move document to trash? (FR-19 — restorable)")) return;
+    if (!window.confirm("Move document to trash? You can restore it later.")) return;
     try { await deleteDocument(id); loadData(); }
     catch (e) { alert(e.message); }
   }
@@ -98,7 +98,7 @@ export default function UploadPage() {
       <h1 style={{ marginBottom: "10px" }}>Upload Documents</h1>
       <p style={{ color: "#94a3b8", marginBottom: "24px" }}>
         Upload letters, notices and scanned mail. PDF, JPG, PNG, TIFF — max 50 MB each,
-        up to 20 files per batch (FR-1, FR-2).
+        up to 20 files per batch.
       </p>
 
       {/* Drop zone */}
@@ -159,7 +159,7 @@ export default function UploadPage() {
       {/* Pending confirmations */}
       {pending.length > 0 && (
         <div style={{ marginBottom: "28px" }}>
-          <h2 style={{ marginBottom: "14px" }}>Pending AI Extractions (FR-14)</h2>
+          <h2 style={{ marginBottom: "14px" }}>Pending AI Extractions</h2>
           {pending.map((item) => (
             <div key={item.job_id} style={{
               background: "rgba(255,255,255,0.7)", backdropFilter: "blur(10px)",
@@ -192,7 +192,7 @@ export default function UploadPage() {
       {/* Uploaded documents */}
       {documents.length > 0 && (
         <div>
-          <h2 style={{ marginBottom: "14px" }}>Uploaded Documents (FR-27)</h2>
+          <h2 style={{ marginBottom: "14px" }}>Uploaded Documents</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {documents.map((doc) => (
               <div key={doc.id} style={{

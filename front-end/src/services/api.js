@@ -1,4 +1,7 @@
-const BASE = "http://localhost:9000";
+// Same-origin "/api" by default (Vite/nginx proxy forwards it to the backend),
+// so the app works behind a single Cloudflare tunnel URL. The offline build
+// overrides this with VITE_API_BASE=http://localhost:9000 (direct, no proxy).
+const BASE = import.meta.env.VITE_API_BASE || "/api";
 
 async function req(method, path, body) {
   const isForm = body instanceof FormData;

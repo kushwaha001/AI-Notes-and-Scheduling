@@ -43,7 +43,7 @@ export default function TimelinePage() {
     <>
       <div style={{ marginBottom: "24px" }}>
         <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
-          Unified Timeline (FR-34)
+          Unified Timeline
         </p>
         <h1 style={{ margin: 0, fontSize: "42px" }}>Timeline</h1>
         <p style={{ color: "#64748b", marginTop: "10px" }}>

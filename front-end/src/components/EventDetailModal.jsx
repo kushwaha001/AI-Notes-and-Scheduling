@@ -6,7 +6,7 @@ import { fmtDate } from "./DateInput";
 function Field({ label, value, confidence }) {
   if (value === null || value === undefined || value === "") return null;
   const pct = confidence != null ? Math.round(confidence * 100) : null;
-  const low = pct != null && pct < 70; // FR-10/FR-14 — low confidence flagged
+  const low = pct != null && pct < 70; // low-confidence fields flagged
   return (
     <div style={{ marginBottom: "12px" }}>
       <p style={{ margin: "0 0 3px", color: "#64748b", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
@@ -33,6 +33,7 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState("");
+  const [docPopup, setDocPopup] = useState(null); // small source popup
 
   useEffect(() => {
     if (eventId == null) return;
@@ -104,19 +105,19 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
                 <Field label="Source" value={ev.source} />
               </div>
 
-              {/* AI-parsed extraction (FR-8, FR-10) */}
+              {/* Summary / Additional Detail (AI-parsed when available) */}
               <div style={{
                 background: "#f8fafc", borderRadius: "14px", padding: "16px 18px",
                 marginBottom: "18px", border: "1px solid #e2e8f0",
               }}>
-                <h3 style={{ margin: "0 0 12px", fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  🤖 AI-Parsed Details
+                <h3 style={{ margin: "0 0 12px", fontSize: "15px" }}>
+                  Summary / Additional Detail
                 </h3>
                 {extractions.length === 0 ? (
                   <p style={{ margin: 0, color: "#94a3b8", fontSize: "13px" }}>
                     {ev.source === "manual"
-                      ? "This event was created manually — no AI extraction."
-                      : "No AI-parsed fields are linked to this event yet."}
+                      ? "This event was created manually — no additional detail."
+                      : "No additional detail is linked to this event yet."}
                   </p>
                 ) : (
                   extractions.map((ex, i) => {
@@ -144,10 +145,10 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
                 )}
               </div>
 
-              {/* Source document (FR-27) */}
+              {/* Official Document — opens a small popup */}
               {docs.length > 0 && (
                 <div style={{ marginBottom: "18px" }}>
-                  <h3 style={{ margin: "0 0 10px", fontSize: "15px" }}>Source Document</h3>
+                  <h3 style={{ margin: "0 0 10px", fontSize: "15px" }}>Official Document</h3>
                   {docs.map((d) => (
                     <div key={d.id} style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -155,16 +156,16 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
                       background: "#eff6ff", marginBottom: "8px",
                     }}>
                       <span style={{ fontSize: "14px" }}>{d.filename}</span>
-                      <a href={documentDownloadUrl(d.id)} target="_blank" rel="noreferrer"
-                        style={{ color: "#2563eb", border: "1px solid #2563eb", padding: "4px 14px", borderRadius: "8px", fontSize: "12px", textDecoration: "none", fontWeight: 600 }}>
-                        Open original
-                      </a>
+                      <button onClick={() => setDocPopup(d)}
+                        style={{ color: "#2563eb", border: "1px solid #2563eb", background: "transparent", padding: "4px 14px", borderRadius: "8px", fontSize: "12px", cursor: "pointer", fontWeight: 600 }}>
+                        View source
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* History (FR-28) */}
+              {/* History */}
               {history.length > 0 && (
                 <details style={{ marginBottom: "18px" }}>
                   <summary style={{ cursor: "pointer", fontSize: "14px", color: "#475569", fontWeight: 600 }}>
@@ -199,6 +200,47 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
           )}
         </div>
       </motion.div>
+
+      {/* Small source-document popup */}
+      {docPopup && (
+        <div
+          onClick={(e) => { e.stopPropagation(); setDocPopup(null); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1200,
+            background: "rgba(15,23,42,0.4)", display: "flex",
+            alignItems: "center", justifyContent: "center", padding: "20px",
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "white", borderRadius: "16px", padding: "22px",
+              width: "100%", maxWidth: "360px", boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px" }}>Source Document</h3>
+              <button onClick={() => setDocPopup(null)}
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "20px" }}>×</button>
+            </div>
+            <p style={{ margin: "0 0 6px" }}><strong>{docPopup.filename}</strong></p>
+            <p style={{ margin: "0 0 4px", color: "#64748b", fontSize: "13px" }}>
+              Type: {(docPopup.file_type || "").toUpperCase()}
+            </p>
+            {docPopup.uploaded_at && (
+              <p style={{ margin: "0 0 14px", color: "#64748b", fontSize: "13px" }}>
+                Uploaded: {fmtDate(docPopup.uploaded_at)}
+              </p>
+            )}
+            <a href={documentDownloadUrl(docPopup.id)} target="_blank" rel="noreferrer"
+              style={{ display: "inline-block", background: "#2563eb", color: "white", padding: "9px 18px", borderRadius: "10px", textDecoration: "none", fontWeight: 600, fontSize: "14px" }}>
+              Open original
+            </a>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

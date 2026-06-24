@@ -27,8 +27,12 @@ echo [3/3] Building the React frontend (front-end\dist)...
 pushd front-end
 call npm install
 if errorlevel 1 goto err
+REM Offline serves the static UI directly (no proxy), so point it at the
+REM backend with an absolute URL.
+set "VITE_API_BASE=http://localhost:9000"
 call npm run build
 if errorlevel 1 goto err
+set "VITE_API_BASE="
 popd
 
 echo.

@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 import hashlib
 import os
-from api.config import UPLOAD_DIR, MAX_SIZE, ALLOWED_DOCS
+from api.config import UPLOAD_DIR, MAX_SIZE, MAX_BATCH, ALLOWED_DOCS
 from api.db import get_db
 
 router = APIRouter(tags=["Documents"])
@@ -59,6 +59,21 @@ async def upload_document(file: UploadFile = File(...)):
     dest = os.path.join(UPLOAD_DIR, file.filename)
 
     try:
+        # FR-1: batch limit — no more than MAX_BATCH files in one batch.
+        # A "batch" = files uploaded within the last 60s (sequential uploads).
+        # Using a rolling window (not a cumulative count) so it can't permanently
+        # block uploads while files sit unprocessed in the queue.
+        cur.execute("""
+            SELECT COUNT(*) AS n FROM documents
+            WHERE uploaded_at > NOW() - INTERVAL '60 seconds' AND deleted_at IS NULL
+        """)
+        if cur.fetchone()["n"] >= MAX_BATCH:
+            raise HTTPException(
+                400,
+                f"Batch limit reached: up to {MAX_BATCH} files per batch. "
+                f"Please wait a moment before uploading more."
+            )
+
         # FR-3: hash-based duplicate check
         cur.execute("SELECT id, filename FROM documents WHERE file_hash = %s", (file_hash,))
         existing = cur.fetchone()

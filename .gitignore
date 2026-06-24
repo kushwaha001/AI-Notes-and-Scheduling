@@ -33,3 +33,10 @@ offline/wheels/
 offline/installers/
 *.tar
 front-end/dist/
+
+# Cloudflare tunnel binary (download locally, don't commit)
+cloudflared.exe
+
+PROJECT_GUIDE.md
+SHARING.md
+share-with-tunnel.bat

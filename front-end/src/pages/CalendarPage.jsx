@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import CalendarContainer from "../components/CalendarContainer";
 import EventDetailModal from "../components/EventDetailModal";
-import DateInput, { fmtDate, isoToDDMmmYYYY } from "../components/DateInput";
+import DateInput, { fmtDate, toApiDate } from "../components/DateInput";
 import { motion } from "framer-motion";
-import { createEvent, getEvents, deleteEvent, updateEvent } from "../services/api";
+import { createEvent, getEvents, deleteEvent, updateEvent, getTasks, createTask } from "../services/api";
 
 const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
@@ -12,9 +13,12 @@ const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const CATEGORIES = ["General","Meeting","Reply","Review","Personal","Restricted","Confidential"];
 
 // ── Year view ─────────────────────────────────────────────────────────────────
-function YearView({ year, events, onDayClick }) {
+function YearView({ year, events, tasks, onDayClick }) {
   const eventDates = new Set(
     events.map((e) => e.event_date ? String(e.event_date).split("T")[0] : null).filter(Boolean)
+  );
+  const taskDates = new Set(
+    (tasks || []).map((t) => t.due_date ? String(t.due_date).split("T")[0] : null).filter(Boolean)
   );
   const today = new Date();
 
@@ -42,12 +46,19 @@ function YearView({ year, events, onDayClick }) {
                 const dateStr = `${year}-${String(mi + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
                 const isToday = today.getFullYear() === year && today.getMonth() === mi && today.getDate() === day;
                 const hasEv   = eventDates.has(dateStr);
+                const hasTask = taskDates.has(dateStr);
+
+                // colour priority: today > event (blue) > task (green)
+                let bg = "transparent", fg = "#374151";
+                if (isToday)      { bg = "#2563eb"; fg = "white"; }
+                else if (hasEv)   { bg = "#bfdbfe"; fg = "#1d4ed8"; }
+                else if (hasTask) { bg = "#bbf7d0"; fg = "#15803d"; }
 
                 return (
                   <div
                     key={day}
                     onClick={() => onDayClick(dateStr)}
-                    title={hasEv ? "Has event" : ""}
+                    title={hasEv ? "Has event" : hasTask ? "Has task" : ""}
                     style={{
                       fontSize: "10px",
                       textAlign: "center",
@@ -57,9 +68,9 @@ function YearView({ year, events, onDayClick }) {
                       height: "18px",
                       lineHeight: "18px",
                       margin: "auto",
-                      background: isToday ? "#2563eb" : hasEv ? "#bfdbfe" : "transparent",
-                      color: isToday ? "white" : hasEv ? "#1d4ed8" : "#374151",
-                      fontWeight: isToday || hasEv ? 700 : 400,
+                      background: bg,
+                      color: fg,
+                      fontWeight: (isToday || hasEv || hasTask) ? 700 : 400,
                     }}
                   >
                     {day}
@@ -76,14 +87,20 @@ function YearView({ year, events, onDayClick }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function CalendarPage() {
-  const [activeView, setActiveView]   = useState("calendar"); // calendar | year
-  const [eventCount, setEventCount]   = useState(null);
+  const navigate = useNavigate();
+  // view: month-grid | week | day | year
+  const [activeView, setActiveView]   = useState("month-grid");
+  const [counts, setCounts]           = useState(null);       // { events, tasks }
   const [allEvents, setAllEvents]     = useState([]);
+  const [allTasks, setAllTasks]       = useState([]);
   const [showForm, setShowForm]       = useState(false);
   const [refreshKey, setRefreshKey]   = useState(0);
   const [selectedDayEvents, setSelectedDayEvents] = useState(null);
 
   const [yearNav, setYearNav] = useState(new Date().getFullYear());
+
+  // +Add dropdown menu
+  const [showAddMenu, setShowAddMenu] = useState(false);
 
   const EMPTY_FORM = {
     title: "", event_date: "", event_time: "",
@@ -94,7 +111,13 @@ export default function CalendarPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg]       = useState("");
 
-  // FR-18 — edit/reschedule
+  // New Task form
+  const EMPTY_TASK = { title: "", due_date: "", category: "General" };
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [taskForm, setTaskForm]         = useState(EMPTY_TASK);
+  const [taskMsg, setTaskMsg]           = useState("");
+
+  // edit/reschedule
   const [editing, setEditing] = useState(null); // event being edited
 
   // event detail popup
@@ -102,25 +125,43 @@ export default function CalendarPage() {
 
   useEffect(() => {
     getEvents().then(setAllEvents).catch(() => {});
+    getTasks({}).then(setAllTasks).catch(() => {});
   }, [refreshKey]);
+
+  async function handleCreateTask() {
+    if (!taskForm.title) { setTaskMsg("Title is required."); return; }
+    try {
+      await createTask({
+        title   : taskForm.title,
+        due_date: toApiDate(taskForm.due_date),
+        category: taskForm.category,
+      });
+      setTaskMsg("Task saved.");
+      setTaskForm(EMPTY_TASK);
+      setShowTaskForm(false);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      setTaskMsg(`Error: ${e.message}`);
+    }
+  }
 
   async function handleCreate() {
     if (!form.title || !form.event_date) { setMsg("Title and date are required."); return; }
     setSaving(true); setMsg("");
     try {
-      // FR-15 — conflict warning at save
+      // conflict warning at save
       const clash = allEvents.find(
         (e) => String(e.event_date).split("T")[0] === form.event_date
       );
       if (clash) {
         const ok = window.confirm(
-          `⚠ Conflict (FR-15): "${clash.title}" is already on ${fmtDate(form.event_date)}.\nSave anyway?`
+          `⚠ Conflict: "${clash.title}" is already on ${fmtDate(form.event_date)}.\nSave anyway?`
         );
         if (!ok) { setSaving(false); return; }
       }
       const payload = {
         title         : form.title,
-        event_date    : isoToDDMmmYYYY(form.event_date),
+        event_date    : toApiDate(form.event_date),
         event_time    : form.event_time,
         venue         : form.venue,
         attendees     : form.attendees,
@@ -131,7 +172,7 @@ export default function CalendarPage() {
       if (form.recurrence) {
         payload.recurrence = form.recurrence;
         payload.interval   = Number(form.interval) || 1;
-        if (form.end_date)  payload.end_date  = isoToDDMmmYYYY(form.end_date);
+        if (form.end_date)  payload.end_date  = toApiDate(form.end_date);
         if (form.end_count) payload.end_count = Number(form.end_count);
       }
       const res = await createEvent(payload);
@@ -163,7 +204,7 @@ export default function CalendarPage() {
     try {
       await updateEvent(editing.id, {
         title         : editing.title,
-        event_date    : isoToDDMmmYYYY(editing.event_date),
+        event_date    : toApiDate(editing.event_date),
         event_time    : editing.event_time,
         venue         : editing.venue,
         attendees     : editing.attendees,
@@ -178,7 +219,7 @@ export default function CalendarPage() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm("Move event to trash? You can restore it later (FR-19).")) return;
+    if (!window.confirm("Move event to trash? You can restore it later.")) return;
     await deleteEvent(id).catch((e) => alert(e.message));
     setRefreshKey((k) => k + 1);
     setSelectedDayEvents(null);
@@ -188,12 +229,17 @@ export default function CalendarPage() {
     const evs = allEvents.filter(
       (e) => String(e.event_date).split("T")[0] === dateStr
     );
-    setSelectedDayEvents({ date: dateStr, events: evs });
+    const tks = allTasks.filter(
+      (t) => t.due_date && String(t.due_date).split("T")[0] === dateStr
+    );
+    setSelectedDayEvents({ date: dateStr, events: evs, tasks: tks });
   }
 
-  // Clicking an event in the schedule-x calendar opens the detail popup
+  // Clicking an item in the calendar: events open the detail popup; tasks go to Tasks
   function handleEventClick(calendarEvent) {
-    if (calendarEvent?.id != null) setDetailEventId(Number(calendarEvent.id));
+    const id = String(calendarEvent?.id || "");
+    if (id.startsWith("event-")) setDetailEventId(Number(id.slice(6)));
+    else if (id.startsWith("task-")) navigate("/tasks");
   }
 
   const now = new Date();
@@ -207,42 +253,120 @@ export default function CalendarPage() {
         <h1 style={{ margin: 0, fontSize: "42px" }}>Schedule &amp; Events</h1>
       </div>
 
-      {/* View switcher — Month/Week/Day are handled by schedule-x's own toolbar */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap" }}>
-        <button
-          onClick={() => setActiveView("calendar")}
-          style={{
-            padding: "9px 20px", borderRadius: "10px", border: "none",
-            background: activeView === "calendar" ? "#2563eb" : "#f1f5f9",
-            color: activeView === "calendar" ? "white" : "#475569",
-            fontWeight: 600, cursor: "pointer", fontSize: "14px",
-          }}
-        >
-          Calendar
-        </button>
-        <button
-          onClick={() => setActiveView("year")}
-          style={{
-            padding: "9px 20px", borderRadius: "10px", border: "none",
-            background: activeView === "year" ? "#2563eb" : "#f1f5f9",
-            color: activeView === "year" ? "white" : "#475569",
-            fontWeight: 600, cursor: "pointer", fontSize: "14px",
-          }}
-        >
-          Year
-        </button>
+      {/* Unified view switcher (Month / Week / Day / Year) */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: "13px", color: "#64748b", marginRight: "2px", fontWeight: 600 }}>View:</span>
+        {[
+          { key: "month-grid", label: "Month" },
+          { key: "week",       label: "Week" },
+          { key: "day",        label: "Day" },
+          { key: "year",       label: "Year" },
+        ].map((v) => (
+          <button
+            key={v.key}
+            onClick={() => setActiveView(v.key)}
+            style={{
+              padding: "8px 18px", borderRadius: "10px", border: "none",
+              background: activeView === v.key ? "#2563eb" : "#f1f5f9",
+              color: activeView === v.key ? "white" : "#475569",
+              fontWeight: 600, cursor: "pointer", fontSize: "14px",
+            }}
+          >
+            {v.label}
+          </button>
+        ))}
         <div style={{ flex: 1 }} />
-        <button
-          onClick={() => { setShowForm((v) => !v); setMsg(""); }}
+
+        {/* Colour legend */}
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginRight: "8px" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#64748b" }}>
+            <span style={{ width: "10px", height: "10px", borderRadius: "3px", background: "#2563eb" }} /> Events
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#64748b" }}>
+            <span style={{ width: "10px", height: "10px", borderRadius: "3px", background: "#16a34a" }} /> Tasks
+          </span>
+        </div>
+
+        {/* + Add dropdown */}
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setShowAddMenu((v) => !v)}
+            style={{
+              background: "#2563eb", color: "white", border: "none",
+              padding: "9px 20px", borderRadius: "10px", cursor: "pointer",
+              fontWeight: 600, fontSize: "14px",
+            }}
+          >
+            + Add ▾
+          </button>
+          {showAddMenu && (
+            <div style={{
+              position: "absolute", right: 0, top: "44px", zIndex: 50,
+              background: "white", borderRadius: "12px", overflow: "hidden",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.18)", border: "1px solid #e2e8f0",
+              minWidth: "160px",
+            }}>
+              <button
+                onClick={() => { setShowAddMenu(false); setShowTaskForm(false); setShowForm(true); setMsg(""); }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: "14px", color: "#1e3a8a", fontWeight: 600 }}
+              >
+                📅 New Event
+              </button>
+              <button
+                onClick={() => { setShowAddMenu(false); setShowForm(false); setShowTaskForm(true); setTaskMsg(""); }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 16px", border: "none", borderTop: "1px solid #f1f5f9", background: "transparent", cursor: "pointer", fontSize: "14px", color: "#14532d", fontWeight: 600 }}
+              >
+                📋 New Task
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Create task form */}
+      {showTaskForm && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
           style={{
-            background: "#2563eb", color: "white", border: "none",
-            padding: "9px 20px", borderRadius: "10px", cursor: "pointer",
-            fontWeight: 600, fontSize: "14px",
+            background: "white", borderRadius: "18px",
+            padding: "22px", marginBottom: "20px",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+            border: "1px solid #e2e8f0",
           }}
         >
-          + Add Event
-        </button>
-      </div>
+          <h3 style={{ margin: "0 0 16px" }}>New Task</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Title *</label>
+              <input type="text" value={taskForm.title}
+                onChange={(e) => setTaskForm((f) => ({ ...f, title: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }} />
+            </div>
+            <DateInput label="Due Date" value={taskForm.due_date}
+              onChange={(v) => setTaskForm((f) => ({ ...f, due_date: v }))} />
+            <div>
+              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Category</label>
+              <select value={taskForm.category}
+                onChange={(e) => setTaskForm((f) => ({ ...f, category: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}>
+                {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button onClick={handleCreateTask}
+              style={{ background: "#16a34a", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+              Save Task
+            </button>
+            <button onClick={() => { setShowTaskForm(false); setTaskMsg(""); }}
+              style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
+              Cancel
+            </button>
+            {taskMsg && <span style={{ color: taskMsg.startsWith("Error") ? "#ef4444" : "#10b981", fontSize: "14px" }}>{taskMsg}</span>}
+          </div>
+        </motion.div>
+      )}
 
       {/* Create event form */}
       {showForm && (
@@ -256,7 +380,7 @@ export default function CalendarPage() {
             border: "1px solid #e2e8f0",
           }}
         >
-          <h3 style={{ margin: "0 0 16px" }}>New Event (FR-7)</h3>
+          <h3 style={{ margin: "0 0 16px" }}>New Event</h3>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
             <div>
               <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Title *</label>
@@ -291,7 +415,7 @@ export default function CalendarPage() {
               />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Classification (FR-36)</label>
+              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Classification</label>
               <select value={form.classification}
                 onChange={(e) => setForm((f) => ({ ...f, classification: e.target.value }))}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}
@@ -304,7 +428,7 @@ export default function CalendarPage() {
           {/* FR-20 — recurrence */}
           <div style={{ background: "#f8fafc", borderRadius: "12px", padding: "14px", marginBottom: "16px", border: "1px solid #e2e8f0" }}>
             <label style={{ display: "block", fontSize: "13px", color: "#475569", fontWeight: 600, marginBottom: "10px" }}>
-              Repeat (FR-20)
+              Repeat
             </label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px" }}>
               <select value={form.recurrence}
@@ -325,12 +449,9 @@ export default function CalendarPage() {
                       title="Repeat every N periods"
                       style={{ width: "100%", padding: "9px 10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }} />
                   </div>
-                  <div>
-                    <input type="date" value={form.end_date}
-                      onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value, end_count: "" }))}
-                      title="End date"
-                      style={{ width: "100%", padding: "9px 10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }} />
-                  </div>
+                  <DateInput value={form.end_date}
+                    onChange={(v) => setForm((f) => ({ ...f, end_date: v, end_count: "" }))} />
+
                   <div>
                     <input type="number" min="1" value={form.end_count}
                       onChange={(e) => setForm((f) => ({ ...f, end_count: e.target.value, end_date: "" }))}
@@ -379,19 +500,20 @@ export default function CalendarPage() {
                 ›
               </button>
               <span style={{ color: "#94a3b8", fontSize: "13px" }}>
-                {allEvents.filter((e) => String(e.event_date).startsWith(String(yearNav))).length} events this year
+                {allEvents.filter((e) => String(e.event_date).startsWith(String(yearNav))).length} events ·{" "}
+                {allTasks.filter((t) => t.due_date && String(t.due_date).startsWith(String(yearNav))).length} tasks
               </span>
             </div>
           )}
 
           {activeView === "year" ? (
-            <YearView year={yearNav} events={allEvents} onDayClick={handleDayClick} />
+            <YearView year={yearNav} events={allEvents} tasks={allTasks} onDayClick={handleDayClick} />
           ) : (
-            /* schedule-x renders its own Month/Week/Day toolbar inside */
             <CalendarContainer
-              onEventCount={setEventCount}
+              onCounts={setCounts}
               refreshKey={refreshKey}
               onEventClick={handleEventClick}
+              view={activeView}
             />
           )}
         </div>
@@ -454,6 +576,29 @@ export default function CalendarPage() {
               ))
             )}
 
+            {/* Tasks due on this day */}
+            {selectedDayEvents.tasks && selectedDayEvents.tasks.length > 0 && (
+              <div style={{ marginTop: "6px" }}>
+                <p style={{ margin: "0 0 8px", fontSize: "12px", fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Tasks due
+                </p>
+                {selectedDayEvents.tasks.map((t) => (
+                  <div key={`t-${t.id}`} style={{
+                    background: "#f0fdf4", borderRadius: "12px",
+                    padding: "12px 14px", marginBottom: "8px",
+                    border: "1px solid #bbf7d0",
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                  }}>
+                    <span style={{ fontWeight: 600, fontSize: "14px" }}>📋 {t.title}</span>
+                    <button onClick={() => navigate("/tasks")}
+                      style={{ background: "transparent", color: "#16a34a", border: "1px solid #16a34a", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
+                      Open
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <button
               onClick={() => { setShowForm(true); setForm((f) => ({ ...f, event_date: selectedDayEvents.date })); }}
               style={{
@@ -469,14 +614,14 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* Event count chip */}
-      {activeView !== "year" && eventCount !== null && (
+      {/* Count chip */}
+      {activeView !== "year" && counts && (
         <p style={{ color: "#94a3b8", fontSize: "13px", marginTop: "12px" }}>
-          {eventCount} total events in calendar
+          {counts.events} events · {counts.tasks} tasks shown
         </p>
       )}
 
-      {/* FR-18 — edit / reschedule modal */}
+      {/* edit / reschedule modal */}
       {editing && (
         <div
           onClick={() => setEditing(null)}
@@ -496,7 +641,7 @@ export default function CalendarPage() {
               boxShadow: "0 30px 80px rgba(0,0,0,0.3)",
             }}
           >
-            <h3 style={{ margin: "0 0 18px" }}>Edit / Reschedule Event (FR-18)</h3>
+            <h3 style={{ margin: "0 0 18px" }}>Edit / Reschedule Event</h3>
 
             <div style={{ marginBottom: "12px" }}>
               <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Title</label>

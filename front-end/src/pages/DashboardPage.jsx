@@ -65,9 +65,6 @@ function DashboardPage() {
         transition={{ duration: 0.8 }}
         style={{ marginBottom: "60px" }}
       >
-        <p style={{ color: "#60a5fa", fontSize: "14px", textTransform: "uppercase", letterSpacing: "2px", marginBottom: "12px" }}>
-          AI Notes &amp; Scheduling
-        </p>
         <h1 style={{ fontSize: "64px", fontWeight: "800", margin: 0, lineHeight: 1 }}>
           {greetingByHour()}
         </h1>
@@ -81,11 +78,11 @@ function DashboardPage() {
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "24px", marginBottom: "60px" }}>
         {[
-          { title: "Events Today",         value: todayEvents.length,  subtitle: "Scheduled today",       delay: 0.2,  to: "/calendar" },
-          { title: "Open Tasks",           value: openTasks.length,    subtitle: "Need attention",        delay: 0.35, to: "/tasks" },
-          { title: "Pending Confirmations",value: pendingConf.length,  subtitle: "Awaiting your review",  delay: 0.5,  to: "/upload" },
-          { title: "Pending Replies",      value: pendingReply.length, subtitle: "Reply tasks due soon",  delay: 0.65, to: "/tasks" },
-        ].map(({ title, value, subtitle, delay, to }) => (
+          { title: "Events Today",         value: todayEvents.length,  subtitle: "Scheduled today",       delay: 0.2,  to: "/calendar", color: "#2563eb" },
+          { title: "Open Tasks",           value: openTasks.length,    subtitle: "Need attention",        delay: 0.35, to: "/tasks",    color: "#16a34a" },
+          { title: "Pending Confirmations",value: pendingConf.length,  subtitle: "Awaiting your review",  delay: 0.5,  to: "/upload",   color: "#d97706" },
+          { title: "Pending Replies",      value: pendingReply.length, subtitle: "Reply tasks due soon",  delay: 0.65, to: "/tasks",    color: "#dc2626" },
+        ].map(({ title, value, subtitle, delay, to, color }) => (
           <motion.div
             key={title}
             initial={{ opacity: 0, y: 40 }}
@@ -95,7 +92,7 @@ function DashboardPage() {
             onClick={() => navigate(to)}
             style={clickable}
           >
-            <StatCard title={title} value={dash ? value : "…"} subtitle={subtitle} />
+            <StatCard title={title} value={dash ? value : "…"} subtitle={subtitle} color={color} />
           </motion.div>
         ))}
       </div>

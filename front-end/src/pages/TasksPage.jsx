@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { getTasks, createTask, updateTask, deleteTask } from "../services/api";
-import DateInput, { fmtDate, isoToDDMmmYYYY } from "../components/DateInput";
+import DateInput, { fmtDate, toApiDate } from "../components/DateInput";
 
 const CATEGORIES = ["General","Meeting","Reply","Review","Personal","Restricted","Confidential"];
 
@@ -12,7 +12,7 @@ const STATUS_STYLE = {
 };
 
 export default function TasksPage() {
-  const [tasks, setTasks]       = useState([]);
+  const [allTasks, setAllTasks] = useState([]);   // every task; counts + filtering derive from this
   const [filter, setFilter]     = useState("open");
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState("");
@@ -22,15 +22,15 @@ export default function TasksPage() {
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState("");
 
-  function loadTasks(status) {
+  function loadTasks() {
     setLoading(true);
-    getTasks(status !== "all" ? { status } : {})
-      .then(setTasks)
+    getTasks({})                       // always load all; filter on the client
+      .then(setAllTasks)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { loadTasks(filter); }, [filter]);
+  useEffect(() => { loadTasks(); }, []);
 
   async function handleCreate() {
     if (!form.title) { setMsg("Title is required."); return; }
@@ -38,13 +38,13 @@ export default function TasksPage() {
     try {
       await createTask({
         title      : form.title,
-        due_date   : isoToDDMmmYYYY(form.due_date),
+        due_date   : toApiDate(form.due_date),
         category   : form.category,
       });
       setMsg("Task saved.");
       setForm({ title: "", due_date: "", category: "General", is_reply_task: false });
       setShowForm(false);
-      loadTasks(filter);
+      loadTasks();
     } catch (e) {
       setMsg(`Error: ${e.message}`);
     } finally {
@@ -54,29 +54,31 @@ export default function TasksPage() {
 
   async function handleMarkDone(id) {
     await updateTask(id, { status: "done" }).catch((e) => alert(e.message));
-    loadTasks(filter);
+    loadTasks();
   }
 
   async function handleDelete(id) {
     if (!window.confirm("Move task to trash?")) return;
     await deleteTask(id).catch((e) => alert(e.message));
-    loadTasks(filter);
+    loadTasks();
   }
 
-  // Pending replies = open tasks with a due_date within 2 days or overdue
-  const pendingReplies = tasks.filter((t) => {
-    if (t.status !== "open" || !t.is_reply_task) return false;
-    if (!t.due_date) return false;
-    const due  = new Date(t.due_date);
-    const diff = (due - new Date()) / (1000 * 60 * 60 * 24);
+  // Counts always reflect every task (not the current filter)
+  const counts = {
+    open : allTasks.filter((t) => t.status === "open").length,
+    done : allTasks.filter((t) => t.status === "done").length,
+    all  : allTasks.length,
+  };
+
+  // The list shown depends on the selected filter card
+  const tasks = filter === "all" ? allTasks : allTasks.filter((t) => t.status === filter);
+
+  // Pending replies = open reply-tasks due within 2 days or overdue
+  const pendingReplies = allTasks.filter((t) => {
+    if (t.status !== "open" || !t.is_reply_task || !t.due_date) return false;
+    const diff = (new Date(t.due_date) - new Date()) / (1000 * 60 * 60 * 24);
     return diff <= 2;
   });
-
-  const counts = {
-    open   : tasks.filter((t) => t.status === "open").length,
-    done   : tasks.filter((t) => t.status === "done").length,
-    all    : tasks.length,
-  };
 
   return (
     <>
@@ -87,7 +89,7 @@ export default function TasksPage() {
         style={{ marginBottom: "32px" }}
       >
         <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "10px" }}>
-          Task Management (FR-22, FR-23)
+          Task Management
         </p>
         <h1 style={{ margin: 0, fontSize: "42px" }}>Tasks &amp; Priorities</h1>
         <p style={{ color: "#64748b", marginTop: "12px", fontSize: "16px" }}>
@@ -102,7 +104,7 @@ export default function TasksPage() {
           borderRadius: "16px", padding: "16px 20px", marginBottom: "24px",
         }}>
           <p style={{ margin: "0 0 10px", fontWeight: 700, color: "#c2410c" }}>
-            ⚠ Pending Replies — {pendingReplies.length} due soon (FR-23)
+            ⚠ Pending Replies — {pendingReplies.length} due soon
           </p>
           {pendingReplies.map((t) => (
             <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
@@ -179,7 +181,7 @@ export default function TasksPage() {
               <DateInput label="Due Date" value={form.due_date}
                 onChange={(v) => setForm((f) => ({ ...f, due_date: v }))} />
               <div>
-                <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Category (FR-36)</label>
+                <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Category</label>
                 <select value={form.category}
                   onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
                   style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}

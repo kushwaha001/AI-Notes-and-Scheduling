@@ -40,13 +40,6 @@ function Sidebar() {
         <h2 style={{ color: "#0f172a", margin: 0, fontSize: "20px", fontWeight: "800", lineHeight: 1.2 }}>
           AI Notes and Scheduling
         </h2>
-        <div style={{
-          marginTop: "12px", padding: "6px 12px", borderRadius: "8px",
-          background: "#ecfdf5", color: "#065f46",
-          fontSize: "12px", fontWeight: "600", width: "fit-content",
-        }}>
-          ● Dev Lan
-        </div>
       </div>
 
       {/* Navigation */}
@@ -82,23 +75,6 @@ function Sidebar() {
             </Link>
           );
         })}
-      </div>
-
-      {/* Bottom user card */}
-      <div style={{ marginTop: "auto", paddingTop: "24px" }}>
-        <div style={{
-          background: "rgba(255,255,255,0.85)",
-          backdropFilter: "blur(10px)",
-          borderRadius: "14px",
-          padding: "14px 16px",
-          border: "1px solid rgba(0,0,0,0.06)",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.05)",
-        }}>
-          <strong style={{ color: "#0f172a", fontSize: "14px" }}>AI Notes and Scheduling</strong>
-          <p style={{ color: "#64748b", marginTop: "4px", marginBottom: 0, fontSize: "12px" }}>
-            Private · runs entirely on Dev Lan
-          </p>
-        </div>
       </div>
     </div>
   );

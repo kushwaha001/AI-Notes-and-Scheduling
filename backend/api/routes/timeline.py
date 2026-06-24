@@ -13,17 +13,21 @@ router = APIRouter(tags=["Timeline"])
 
 
 @router.get("/timeline")
-def timeline(limit: int = 100):
-    """Merge events, tasks and notes into one chronological list (newest first)."""
+def timeline(limit: int = 200):
+    """Merge events, tasks and notes into one chronological list (newest first).
+    Events are the high-volume kind, so only the most recent `limit` events are
+    included; ALL tasks and notes are always returned so they never get hidden."""
     conn = get_db()
     cur = conn.cursor()
     items = []
     try:
-        # Events — keyed by event_date
+        # Events — keyed by event_date (cap to the most recent `limit`)
         cur.execute("""
             SELECT id, title, event_date, event_time, venue, classification, source, created_at
             FROM events WHERE status != 'trashed'
-        """)
+            ORDER BY event_date DESC NULLS LAST
+            LIMIT %s
+        """, (limit,))
         for e in cur.fetchall():
             when = e["event_date"]
             items.append({
@@ -78,6 +82,7 @@ def timeline(limit: int = 100):
         cur.close()
         conn.close()
 
-    # Sort newest first; items with no date sink to the bottom
+    # Sort newest first; items with no date sink to the bottom.
+    # No extra truncation here — events are already capped, tasks/notes are few.
     items.sort(key=lambda i: i["date"] or "0000-00-00", reverse=True)
-    return {"timeline": items[:limit]}
+    return {"timeline": items}
