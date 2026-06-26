@@ -6,9 +6,11 @@ Start  : uvicorn api.main:app --reload --port 9000
 Docs   : http://localhost:9000/docs
 """
 
+import logging
 import httpx
 import redis as redis_client
 import psycopg2
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,13 +22,30 @@ from api.routes import (
     documents, events, tasks, voice,
     confirmations, queue, search,
     dashboard, audit, notes,
+    trash, timeline,
 )
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Auto-create DB and apply schema on every startup."""
+    from api.db_init import init_db
+    try:
+        init_db()
+    except Exception as exc:
+        log.error("Startup DB init failed (continuing anyway): %s", exc)
+    yield
+
 
 # ── APP INIT ──────────────────────────────────────────────────
 app = FastAPI(
     title="AI Notes Scheduler",
     version="1.0.0",
     description="Turn documents and voice notes into calendar events.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -47,6 +66,8 @@ app.include_router(search.router)
 app.include_router(dashboard.router)
 app.include_router(audit.router)
 app.include_router(notes.router)
+app.include_router(trash.router)
+app.include_router(timeline.router)
 
 
 # ── SYSTEM ENDPOINTS ──────────────────────────────────────────

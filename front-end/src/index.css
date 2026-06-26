@@ -14,4 +14,25 @@ body,
 body {
   background: #020617;
   font-family: Inter, system-ui, sans-serif;
+  cursor: default;           /* plain text shows the normal arrow, not an I-beam */
+}
+
+/* Interactive elements get the hand pointer */
+button,
+a,
+select,
+label,
+[role="button"] {
+  cursor: pointer;
+}
+
+/* Only real text fields show the text (I-beam) cursor */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea {
+  cursor: text;
+}
+
+/* Hide schedule-x's built-in view picker — the page provides its own switcher */
+.sx__view-selection {
+  display: none !important;
 }

@@ -26,12 +26,13 @@ function LoadingScreen() {
       >
         <h1
           style={{
-            fontSize: "64px",
+            fontSize: "52px",
             margin: 0,
             fontWeight: "800",
+            textAlign: "center",
           }}
         >
-          AI Notes
+          AI Notes and Scheduling
         </h1>
       </motion.div>
     </div>

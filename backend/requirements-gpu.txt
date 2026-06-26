@@ -3,8 +3,8 @@
 # On an internet machine run: pip download -r requirements-gpu.txt -d ./wheels
 # Then on offline machine:   pip install --no-index --find-links=./wheels -r requirements-gpu.txt
 
-torch==2.6.0+cu128
-torchaudio==2.6.0+cu128
+torch==2.7.1+cu128
+torchaudio==2.7.1+cu128
 
 # ── Whisper STT (GPU-accelerated via CTranslate2) ─────────────
 faster-whisper==1.1.0

@@ -1,10 +1,40 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 import hashlib
 import os
-from api.config import UPLOAD_DIR, MAX_SIZE, ALLOWED_DOCS
+from api.config import UPLOAD_DIR, MAX_SIZE, MAX_BATCH, ALLOWED_DOCS
 from api.db import get_db
 
 router = APIRouter(tags=["Documents"])
+
+_MIME = {
+    "pdf":  "application/pdf",
+    "jpg":  "image/jpeg",
+    "png":  "image/png",
+    "tiff": "image/tiff",
+}
+
+
+@router.get("/documents/{doc_id}/download")
+def download_document(doc_id: int):
+    """FR-27 — open/download the original uploaded document (the record)."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT filename, file_path, file_type FROM documents WHERE id = %s", (doc_id,))
+        doc = cur.fetchone()
+        if not doc:
+            raise HTTPException(404, "Document not found.")
+        if not os.path.exists(doc["file_path"]):
+            raise HTTPException(410, "Original file is no longer on disk.")
+        return FileResponse(
+            doc["file_path"],
+            media_type=_MIME.get(doc["file_type"], "application/octet-stream"),
+            filename=doc["filename"],
+        )
+    finally:
+        cur.close()
+        conn.close()
 
 
 @router.post("/upload")
@@ -29,6 +59,21 @@ async def upload_document(file: UploadFile = File(...)):
     dest = os.path.join(UPLOAD_DIR, file.filename)
 
     try:
+        # FR-1: batch limit — no more than MAX_BATCH files in one batch.
+        # A "batch" = files uploaded within the last 60s (sequential uploads).
+        # Using a rolling window (not a cumulative count) so it can't permanently
+        # block uploads while files sit unprocessed in the queue.
+        cur.execute("""
+            SELECT COUNT(*) AS n FROM documents
+            WHERE uploaded_at > NOW() - INTERVAL '60 seconds' AND deleted_at IS NULL
+        """)
+        if cur.fetchone()["n"] >= MAX_BATCH:
+            raise HTTPException(
+                400,
+                f"Batch limit reached: up to {MAX_BATCH} files per batch. "
+                f"Please wait a moment before uploading more."
+            )
+
         # FR-3: hash-based duplicate check
         cur.execute("SELECT id, filename FROM documents WHERE file_hash = %s", (file_hash,))
         existing = cur.fetchone()
