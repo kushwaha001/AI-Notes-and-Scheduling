@@ -1,11 +1,13 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 import hashlib
 import os
+import logging
 from api.config import UPLOAD_DIR, MAX_SIZE, MAX_BATCH, ALLOWED_DOCS
 from api.db import get_db
 
 router = APIRouter(tags=["Documents"])
+log = logging.getLogger(__name__)
 
 _MIME = {
     "pdf":  "application/pdf",
@@ -38,8 +40,8 @@ def download_document(doc_id: int):
 
 
 @router.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
-    """FR-1 validate format/size, FR-3 duplicate check, NFR-6 queue."""
+async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """FR-1 validate format/size, FR-3 duplicate check, NFR-6 queue, FR-8 extract."""
 
     if file.content_type not in ALLOWED_DOCS:
         raise HTTPException(400, f"File type '{file.content_type}' not allowed. Use PDF, JPG, PNG or TIFF.")
@@ -75,10 +77,49 @@ async def upload_document(file: UploadFile = File(...)):
             )
 
         # FR-3: hash-based duplicate check
-        cur.execute("SELECT id, filename FROM documents WHERE file_hash = %s", (file_hash,))
+        cur.execute("SELECT id, filename, file_path, deleted_at FROM documents WHERE file_hash = %s", (file_hash,))
         existing = cur.fetchone()
         if existing:
-            raise HTTPException(409, f"Duplicate file: already uploaded as '{existing['filename']}' (doc id {existing['id']}).")
+            if existing["deleted_at"] is None:
+                # an active document already has this exact file
+                raise HTTPException(409, f"Duplicate file: already uploaded as '{existing['filename']}' (doc id {existing['id']}).")
+
+            # The match is in the trash — restore it instead of blocking (FR-19).
+            with open(existing["file_path"], "wb") as f:
+                f.write(contents)
+            cur.execute("UPDATE documents SET status = 'queued', deleted_at = NULL WHERE id = %s", (existing["id"],))
+            cur.execute("""
+                UPDATE processing_queue SET status = 'waiting', processed_at = NULL
+                WHERE document_id = %s RETURNING id
+            """, (existing["id"],))
+            row = cur.fetchone()
+            if row:
+                queue_id = row["id"]
+            else:
+                cur.execute("INSERT INTO processing_queue (document_id, status) VALUES (%s,'waiting') RETURNING id", (existing["id"],))
+                queue_id = cur.fetchone()["id"]
+            cur.execute("""
+                INSERT INTO audit_log (action, entity_type, entity_id, detail)
+                VALUES ('restored', 'document', %s, 'Restored via re-upload')
+            """, (existing["id"],))
+            conn.commit()
+
+            ai_on = False
+            try:
+                from api.ai.pipeline import ai_ready, process_document
+                if ai_ready():
+                    ai_on = True
+                    background_tasks.add_task(process_document, existing["id"])
+            except Exception:
+                pass
+            return {
+                "status": "restored" if not ai_on else "processing",
+                "job_id": queue_id, "doc_id": existing["id"], "filename": existing["filename"],
+                "size_kb": len(contents) // 1024,
+                "message": "This file was in the trash — it has been restored"
+                           + (" and is being re-processed." if ai_on else "."),
+                "extractions": [],
+            }
 
         with open(dest, "wb") as f:
             f.write(contents)
@@ -105,13 +146,26 @@ async def upload_document(file: UploadFile = File(...)):
 
         conn.commit()
 
+        # FR-8/NFR-9 — kick off AI extraction in the background if available;
+        # otherwise the doc stays queued and can be processed later (degraded mode).
+        ai_on = False
+        try:
+            from api.ai.pipeline import ai_ready, process_document
+            if ai_ready():
+                ai_on = True
+                background_tasks.add_task(process_document, doc_id)
+        except Exception as e:
+            log.warning("AI not available, leaving doc %s queued: %s", doc_id, e)
+
         return {
-            "status"     : "queued",
+            "status"     : "processing" if ai_on else "queued",
             "job_id"     : queue_id,
             "doc_id"     : doc_id,
             "filename"   : file.filename,
             "size_kb"    : len(contents) // 1024,
-            "message"    : "File accepted. AI extraction will begin shortly.",
+            "message"    : ("AI extraction started — refresh to see results."
+                            if ai_on else
+                            "File accepted and queued. AI is offline; it will be processed when available."),
             "extractions": []
         }
 
@@ -147,9 +201,51 @@ def list_documents():
         conn.close()
 
 
+@router.post("/documents/{doc_id}/reextract")
+def reextract_document(doc_id: int, background_tasks: BackgroundTasks):
+    """FR-14a — re-run extraction on a stored document. Previous extractions are
+    kept (versioned by status), the new one goes through the confirm screen."""
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM documents WHERE id = %s AND deleted_at IS NULL", (doc_id,))
+        if not cur.fetchone():
+            raise HTTPException(404, "Document not found.")
+        # keep prior pending extractions as history (mark superseded)
+        cur.execute("""
+            UPDATE extractions SET status = 'dismissed'
+            WHERE source_type = 'document' AND source_id = %s AND status = 'pending'
+        """, (doc_id,))
+        cur.execute("UPDATE documents SET status = 'queued' WHERE id = %s", (doc_id,))
+        cur.execute("""
+            UPDATE processing_queue
+            SET status = 'waiting', processed_at = NULL, retry_count = retry_count + 1
+            WHERE document_id = %s
+        """, (doc_id,))
+        cur.execute("""
+            INSERT INTO audit_log (action, entity_type, entity_id, detail)
+            VALUES ('extracted', 'document', %s, 'Re-extraction requested')
+        """, (doc_id,))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    ai_on = False
+    try:
+        from api.ai.pipeline import ai_ready, process_document
+        if ai_ready():
+            ai_on = True
+            background_tasks.add_task(process_document, doc_id)
+    except Exception as e:
+        log.warning("Re-extract: AI unavailable for doc %s: %s", doc_id, e)
+
+    return {"status": "reprocessing" if ai_on else "queued", "doc_id": doc_id}
+
+
 @router.get("/documents/{doc_id}")
 def get_document(doc_id: int):
-    """FR-27 — document detail + linked events and tasks."""
+    """FR-27 — document detail + linked events/tasks + ref-number related docs."""
     conn = get_db()
     cur  = conn.cursor()
     try:
@@ -176,7 +272,22 @@ def get_document(doc_id: int):
         """, (doc_id,))
         linked_tasks = cur.fetchall()
 
-        return {"document": doc, "linked_events": linked_events, "linked_tasks": linked_tasks}
+        # FR-24 — documents that share the same reference number (deterministic)
+        related_docs = []
+        if doc.get("ref_number"):
+            cur.execute("""
+                SELECT id, filename, uploaded_at FROM documents
+                WHERE ref_number = %s AND id <> %s AND deleted_at IS NULL
+                ORDER BY uploaded_at DESC
+            """, (doc["ref_number"], doc_id))
+            related_docs = cur.fetchall()
+
+        return {
+            "document": doc,
+            "linked_events": linked_events,
+            "linked_tasks": linked_tasks,
+            "related_documents": related_docs,
+        }
     finally:
         cur.close()
         conn.close()

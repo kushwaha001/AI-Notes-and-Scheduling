@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { checkServices, getQueue, getAuditLog } from "../services/api";
+import { checkServices, getQueue, getAuditLog, createBackup, getLastBackup } from "../services/api";
+
+function fmtWhen(iso) {
+  if (!iso) return "never";
+  return new Date(iso).toLocaleString();
+}
 
 const STATUS_COLOR = {
   ok           : { bg: "#f0fdf4", color: "#16a34a", label: "Online" },
@@ -44,21 +49,37 @@ export default function SystemStatusPage() {
   const [audit, setAudit]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [backup, setBackup]     = useState(null);
+  const [backingUp, setBackingUp] = useState(false);
 
   async function loadAll() {
     setLoading(true);
     try {
-      const [svc, q, a] = await Promise.allSettled([
+      const [svc, q, a, b] = await Promise.allSettled([
         checkServices(),
         getQueue(),
         getAuditLog({ limit: 10 }),
+        getLastBackup(),
       ]);
       if (svc.status === "fulfilled") setServices(svc.value);
       if (q.status   === "fulfilled") setQueue(q.value);
       if (a.status   === "fulfilled") setAudit(a.value);
+      if (b.status   === "fulfilled") setBackup(b.value);
       setLastRefresh(new Date().toLocaleTimeString());
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleBackup() {
+    setBackingUp(true);
+    try {
+      await createBackup();
+      setBackup(await getLastBackup());
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setBackingUp(false);
     }
   }
 
@@ -103,6 +124,28 @@ export default function SystemStatusPage() {
           ))}
         </div>
       )}
+
+      {/* Backup (FR-39) */}
+      <h2 style={{ marginBottom: "14px" }}>Backup</h2>
+      <div style={{
+        background: "white", borderRadius: "16px", padding: "18px 22px", marginBottom: "32px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.06)",
+        display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px",
+      }}>
+        <div>
+          <p style={{ margin: 0, fontWeight: 600 }}>
+            Last successful backup: {backup?.last ? fmtWhen(backup.last.created_at) : "never"}
+          </p>
+          <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "13px" }}>
+            {backup?.total ? `${backup.total} backup(s) on disk · ` : ""}
+            local snapshot of all data + notes (no cloud).
+          </p>
+        </div>
+        <button onClick={handleBackup} disabled={backingUp}
+          style={{ background: "#2563eb", color: "white", border: "none", padding: "10px 20px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+          {backingUp ? "Backing up…" : "Back up now"}
+        </button>
+      </div>
 
       {/* Processing queue */}
       <h2 style={{ marginBottom: "14px" }}>Processing Queue</h2>

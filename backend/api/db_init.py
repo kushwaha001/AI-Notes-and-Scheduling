@@ -222,6 +222,17 @@ CREATE TABLE IF NOT EXISTS system_status (
     queue_length   INT NOT NULL DEFAULT 0,
     last_backup_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS backups (
+    id          SERIAL PRIMARY KEY,
+    path        TEXT NOT NULL,
+    item_count  INT,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+
+-- FR-24: reference number on documents (deterministic auto-linking)
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS ref_number TEXT;
+CREATE INDEX IF NOT EXISTS idx_documents_ref ON documents(ref_number);
 """
 
 

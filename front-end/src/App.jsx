@@ -15,6 +15,8 @@ import UploadPage       from "./pages/UploadPage";
 import CalendarPage     from "./pages/CalendarPage";
 import TasksPage        from "./pages/TasksPage";
 import SearchPage       from "./pages/SearchPage";
+import AskPage          from "./pages/AskPage";
+import VoicePage        from "./pages/VoicePage";
 import NotesPage        from "./pages/NotesPage";
 import TimelinePage     from "./pages/TimelinePage";
 import TrashPage        from "./pages/TrashPage";
@@ -43,6 +45,8 @@ function AnimatedRoutes() {
           <Route path="/calendar"  element={<ErrorBoundary><CalendarPage /></ErrorBoundary>} />
           <Route path="/tasks"     element={<ErrorBoundary><TasksPage /></ErrorBoundary>} />
           <Route path="/search"    element={<ErrorBoundary><SearchPage /></ErrorBoundary>} />
+          <Route path="/ask"       element={<ErrorBoundary><AskPage /></ErrorBoundary>} />
+          <Route path="/voice"     element={<ErrorBoundary><VoicePage /></ErrorBoundary>} />
           <Route path="/notes"     element={<ErrorBoundary><NotesPage /></ErrorBoundary>} />
           <Route path="/timeline"  element={<ErrorBoundary><TimelinePage /></ErrorBoundary>} />
           <Route path="/trash"     element={<ErrorBoundary><TrashPage /></ErrorBoundary>} />

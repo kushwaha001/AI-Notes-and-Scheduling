@@ -1,14 +1,17 @@
-# ── PyTorch with CUDA 12.8 (Python 3.11, Windows) ────────────
-# Download from: https://download.pytorch.org/whl/cu128
-# On an internet machine run: pip download -r requirements-gpu.txt -d ./wheels
-# Then on offline machine:   pip install --no-index --find-links=./wheels -r requirements-gpu.txt
+# ── AI heavy stack (Python 3.11) ─────────────────────────────
+# The EXACT working set is pinned in requirements-lock.txt — install from that
+# offline. These are the headline packages for reference.
+#
+# Where the GPU is actually used:
+#   • LLM + embeddings (gemma3:4b, bge-m3) -> Ollama (its own CUDA runtime)
+#   • Whisper transcription              -> faster-whisper / CTranslate2 (its CUDA)
+# Python `torch` below is used ONLY by Docling/EasyOCR for OCR and runs on CPU
+# by default (the 123 MB CPU wheel). That is fine — OCR is not the bottleneck.
 
-torch==2.7.1+cu128
-torchaudio==2.7.1+cu128
+torch==2.12.1
+torchvision==0.27.1
+faster-whisper==1.2.1
 
-# ── Whisper STT (GPU-accelerated via CTranslate2) ─────────────
-faster-whisper==1.1.0
-
-# ── BGE Embeddings for semantic search ───────────────────────
-FlagEmbedding==1.2.11
-sentence-transformers==3.3.1
+# For GPU-accelerated OCR on a CUDA server (optional), install matching CUDA
+# builds instead, e.g. from https://download.pytorch.org/whl/cu124 :
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124

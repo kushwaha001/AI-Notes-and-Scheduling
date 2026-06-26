@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getDashboard, getAuditLog } from "../services/api";
+import { getDashboard, getAuditLog, checkServices } from "../services/api";
 import StatCard from "../components/StatCard";
 import { motion } from "framer-motion";
+
+const QUICK_ACTIONS = [
+  { label: "Upload document", icon: "📄", to: "/upload",   color: "#2563eb" },
+  { label: "Voice note",      icon: "🎙", to: "/voice",    color: "#7c3aed" },
+  { label: "Ask AI",          icon: "💬", to: "/ask",      color: "#0891b2" },
+  { label: "New event",       icon: "📅", to: "/calendar", color: "#16a34a" },
+  { label: "New task",        icon: "✓",  to: "/tasks",    color: "#d97706" },
+];
 
 // shared hover style for clickable cards/rows
 const clickable = { cursor: "pointer" };
@@ -30,6 +38,7 @@ function DashboardPage() {
   const [dash, setDash]   = useState(null);
   const [audit, setAudit] = useState([]);
   const [error, setError] = useState("");
+  const [ai, setAi]       = useState(null);
 
   useEffect(() => {
     getDashboard()
@@ -39,6 +48,10 @@ function DashboardPage() {
     getAuditLog({ limit: 5 })
       .then(setAudit)
       .catch(() => {});
+
+    checkServices()
+      .then((s) => setAi(s?.ai_extraction === "ready"))
+      .catch(() => setAi(false));
   }, []);
 
   const todayEvents  = dash?.today_events          ?? [];
@@ -73,7 +86,38 @@ function DashboardPage() {
             ? `Could not load dashboard — ${error}`
             : "Manage meetings, deadlines, notes and documents from a single workspace."}
         </p>
+
+        {/* AI status chip */}
+        {ai != null && (
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: "8px", marginTop: "20px",
+            background: ai ? "#ecfdf5" : "#fef2f2", color: ai ? "#065f46" : "#991b1b",
+            border: `1px solid ${ai ? "#a7f3d0" : "#fecaca"}`,
+            padding: "6px 14px", borderRadius: "99px", fontSize: "13px", fontWeight: 600,
+          }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%",
+              background: ai ? "#10b981" : "#ef4444", display: "inline-block" }} />
+            {ai ? "AI extraction online" : "AI offline — manual entry still works (degraded mode)"}
+          </div>
+        )}
       </motion.div>
+
+      {/* Quick actions */}
+      <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "48px" }}>
+        {QUICK_ACTIONS.map((a) => (
+          <motion.button key={a.to} onClick={() => navigate(a.to)}
+            whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }}
+            style={{
+              display: "flex", alignItems: "center", gap: "10px",
+              background: "white", border: "1px solid #e2e8f0", borderLeft: `3px solid ${a.color}`,
+              padding: "14px 20px", borderRadius: "14px", cursor: "pointer",
+              fontWeight: 600, fontSize: "15px", color: "#1e293b",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.05)",
+            }}>
+            <span style={{ fontSize: "20px" }}>{a.icon}</span>{a.label}
+          </motion.button>
+        ))}
+      </div>
 
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "24px", marginBottom: "60px" }}>

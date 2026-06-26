@@ -22,7 +22,7 @@ from api.routes import (
     documents, events, tasks, voice,
     confirmations, queue, search,
     dashboard, audit, notes,
-    trash, timeline,
+    trash, timeline, ask, backup,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +68,8 @@ app.include_router(audit.router)
 app.include_router(notes.router)
 app.include_router(trash.router)
 app.include_router(timeline.router)
+app.include_router(ask.router)
+app.include_router(backup.router)
 
 
 # ── SYSTEM ENDPOINTS ──────────────────────────────────────────
@@ -114,7 +116,21 @@ async def check_services():
     except Exception:
         results["postgres"] = "unreachable"
 
-    # Whisper — loaded on demand in Day 5; report model config only
+    # Docling (document parsing)
+    try:
+        from api.ai.parser import docling_available
+        results["docling"] = "ok" if docling_available() else "not installed"
+    except Exception:
+        results["docling"] = "not installed"
+
+    # Overall AI extraction readiness (Ollama up + Docling installed)
+    try:
+        from api.ai.pipeline import ai_ready
+        results["ai_extraction"] = "ready" if ai_ready() else "offline"
+    except Exception:
+        results["ai_extraction"] = "offline"
+
+    # Whisper — voice transcription, loaded on demand
     results["whisper"] = "configured (loads on first audio upload)"
 
     return results

@@ -20,11 +20,20 @@ MAX_AUDIO = 5 * 60             # 5 min in seconds
 MAX_BATCH = int(os.getenv("MAX_BATCH", "20"))   # max files queued at once (FR-1, configurable)
 
 ALLOWED_DOCS  = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
-ALLOWED_AUDIO = {".wav", ".mp3", ".m4a", ".ogg"}
+# .webm/.opus are what browsers record via MediaRecorder
+ALLOWED_AUDIO = {".wav", ".mp3", ".m4a", ".ogg", ".webm", ".opus"}
 
-# ── Ollama (local LLM on Windows + CUDA) ─────────────────────
+# ── Ollama (local LLM/VLM on Windows + CUDA) ─────────────────
 OLLAMA_HOST  = os.getenv("OLLAMA_HOST",  "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")   # NFR-7: swappable via env
+
+# ── AI extraction toggles ────────────────────────────────────
+AI_ENABLED           = os.getenv("AI_ENABLED", "true").lower() == "true"
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))  # FR-10/FR-14
+# Keep the model resident in VRAM between requests (efficiency — avoids cold starts)
+OLLAMA_KEEP_ALIVE    = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
+# FR-4 scan-quality floor: fewer readable chars than this → treat as unreadable
+MIN_READABLE_CHARS   = int(os.getenv("MIN_READABLE_CHARS", "25"))
 
 # ── Faster-Whisper STT ────────────────────────────────────────
 WHISPER_MODEL        = os.getenv("WHISPER_MODEL",        "medium")

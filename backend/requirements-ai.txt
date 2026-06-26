@@ -1,0 +1,10 @@
+# ── AI document extraction (FR-8) ─────────────────────────────
+# Install on the machine that runs the AI pipeline:
+#   pip install -r requirements-ai.txt
+# Plus: install Ollama (https://ollama.com) and run:  ollama pull gemma3:4b
+#
+# Docling parses PDFs/images to text; the Ollama client talks to the local model.
+
+docling          # PDF/image -> Markdown (downloads layout models on first use)
+easyocr          # OCR engine for Docling (rapidocr's default build is broken)
+ollama           # Python client for the local Ollama server
