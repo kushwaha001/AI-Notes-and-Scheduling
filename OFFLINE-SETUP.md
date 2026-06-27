@@ -62,9 +62,11 @@ needed if you ever want to **rebuild/refresh** the bundle.
 > (English, near large-v3 accuracy, ~10x realtime on GPU once warm) instead of
 > the old `base`. This added four **CUDA runtime wheels** to the bundle
 > (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `nvidia-cuda-runtime-cu12`,
-> `nvidia-cuda-nvrtc-cu12`, ~1.3 GB total) — already included in
-> `wheels-bundle\`. `transcribe.py` auto-registers those DLLs at startup, so no
-> manual CUDA toolkit install is needed; you just need the **NVIDIA driver**.
+> `nvidia-cuda-nvrtc-cu12`, ~1.3 GB total), **pinned to the CUDA 12.8 series** to
+> match the office GPU — already included in `wheels-bundle\`. These wheels are
+> self-contained (they ship the actual CUDA DLLs), so **no CUDA toolkit install is
+> needed** — only the **NVIDIA driver** (any that supports CUDA 12.x).
+> `transcribe.py` auto-registers those DLLs at startup.
 > On a box with **no GPU**, set `WHISPER_DEVICE=cpu` and `WHISPER_COMPUTE_TYPE=int8`
 > in `.env` — it falls back automatically and still works (just slower).
 
