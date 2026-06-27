@@ -35,9 +35,9 @@ internet PC. Just zip the project folder (with `offline\`) and carry it across.
 
 | In `offline\` | What it is | Goes to |
 |---------------|------------|---------|
-| `wheels-bundle\` | All Python wheels — exact locked set (Win x64 / Py 3.11) | `pip install` on the App PC |
+| `wheels-bundle\` | All Python wheels — exact locked set (Win x64 / Py 3.11), **incl. CUDA cuBLAS/cuDNN for GPU voice** | `pip install` on the App PC |
 | `models\ollama-models\` | `gemma3:4b` + `bge-m3` (+ nomic) blobs | the office server's `.ollama\models` |
-| `models\huggingface-cache\` | Whisper `base` + Docling layout models | App PC `%USERPROFILE%\.cache\huggingface` |
+| `models\huggingface-cache\` | Whisper `distil-large-v3` (+ `base` fallback) + Docling layout models | App PC `%USERPROFILE%\.cache\huggingface` |
 | `models\EasyOCR\` | OCR models | App PC `%USERPROFILE%\.EasyOCR` |
 
 You still install **Python 3.11**, **PostgreSQL**, and **Ollama** from
@@ -57,6 +57,16 @@ needed if you ever want to **rebuild/refresh** the bundle.
 >   (idempotent schema) — no manual migration.
 > - Browser notifications need no install; the browser prompts for permission
 >   on first load, and the dashboard remains the reliable fallback.
+
+> **Voice (FR-6) now runs on the GPU.** The STT model is **`distil-large-v3`**
+> (English, near large-v3 accuracy, ~10x realtime on GPU once warm) instead of
+> the old `base`. This added four **CUDA runtime wheels** to the bundle
+> (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `nvidia-cuda-runtime-cu12`,
+> `nvidia-cuda-nvrtc-cu12`, ~1.3 GB total) — already included in
+> `wheels-bundle\`. `transcribe.py` auto-registers those DLLs at startup, so no
+> manual CUDA toolkit install is needed; you just need the **NVIDIA driver**.
+> On a box with **no GPU**, set `WHISPER_DEVICE=cpu` and `WHISPER_COMPUTE_TYPE=int8`
+> in `.env` — it falls back automatically and still works (just slower).
 
 ---
 
@@ -93,9 +103,12 @@ cd backend
 python -m pip download -r requirements-lock.txt pip setuptools wheel -d ..\offline\wheels-bundle
 cd ..
 ```
-> All wheels are plain PyPI (CPU `torch` ~123 MB) — **no CUDA index needed**. The
-> GPU is driven by Ollama (LLM + embeddings) and CTranslate2 (Whisper), not by
-> Python torch. This keeps the bundle ~1 GB instead of ~3.5 GB.
+> All wheels are plain PyPI — **no special CUDA index needed**. Python `torch`
+> stays CPU-only (~123 MB; OCR isn't the bottleneck). The bundle does include the
+> four `nvidia-*-cu12` wheels (~1.3 GB) that **CTranslate2 needs to run Whisper on
+> the GPU**; they're pinned in `requirements-lock.txt` so the command above pulls
+> them automatically. Total bundle ≈ 1.7 GB. (On a CPU-only target these wheels
+> install harmlessly and just go unused.)
 
 ### A2. Frontend dependencies
 ```powershell
@@ -119,7 +132,7 @@ robocopy "$env:USERPROFILE\.ollama\models" offline\models\ollama-models /E
 **2) Whisper + Docling caches** — trigger each once, then copy the caches:
 ```powershell
 cd backend; .\venv\Scripts\activate
-python -c "from faster_whisper import WhisperModel; WhisperModel('base')"
+python -c "from faster_whisper import WhisperModel; WhisperModel('distil-large-v3')"
 python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
 cd ..
 robocopy "$env:USERPROFILE\.cache\huggingface" offline\models\huggingface-cache /E
@@ -222,10 +235,12 @@ OLLAMA_MODEL=gemma3:4b
 EMBED_MODEL=bge-m3
 OLLAMA_KEEP_ALIVE=30m
 
-# Voice (faster-whisper). Use cpu on machines without the CUDA toolkit DLLs.
-WHISPER_MODEL=base
-WHISPER_DEVICE=cpu          # set to cuda on the GPU server
-WHISPER_COMPUTE_TYPE=int8   # float16 on cuda
+# Voice (faster-whisper). GPU default — needs only the NVIDIA driver; the CUDA
+# DLLs ship as wheels and auto-load. No GPU? set device=cpu, compute_type=int8.
+WHISPER_MODEL=distil-large-v3
+WHISPER_DEVICE=cuda
+WHISPER_COMPUTE_TYPE=float16
+WHISPER_LANGUAGE=en
 ```
 If the frontend and backend run on the **same** PC, the Vite proxy needs the
 backend on `localhost:9000` — keep that. `OLLAMA_HOST` can point anywhere on the
@@ -257,7 +272,8 @@ and `ollama list` shows both models on the server.
 |-------|-----------|---------|------|
 | `gemma3:4b` (LLM) | `models\ollama-models` | server `.ollama\models` | ~3.3 GB |
 | `bge-m3` (embeddings) | `models\ollama-models` | server `.ollama\models` | ~1.2 GB |
-| Whisper `base` (voice) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~0.15 GB |
+| Whisper `distil-large-v3` (voice) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~1.45 GB |
+| Whisper `base` (voice, CPU fallback) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~0.15 GB |
 | Docling layout (OCR) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~0.45 GB |
 | EasyOCR models | `models\EasyOCR` | App PC `.EasyOCR` | ~0.11 GB |
 
@@ -357,13 +373,20 @@ Every model is **config, not code** (NFR-7) — you swap it by editing
 
 ### 3) Voice model — `WHISPER_MODEL` / `WHISPER_DEVICE` / `WHISPER_COMPUTE_TYPE`
 Whisper models come from HuggingFace — pre-copy the cache (Part A4) before
-selecting a bigger one.
+selecting a bigger one. **Default is `distil-large-v3` on `cuda/float16`**
+(English; bundled). GPU needs only the NVIDIA driver — the CUDA cuBLAS/cuDNN
+DLLs ship as pip wheels and are auto-loaded by `transcribe.py`.
 
-| Setting | 4 GB / CPU box | GPU server |
-|---------|----------------|-----------|
-| `WHISPER_MODEL` | `base` | `medium` or `large-v3` |
-| `WHISPER_DEVICE` | `cpu` | `cuda` |
-| `WHISPER_COMPUTE_TYPE` | `int8` | `float16` |
+| Setting | No-GPU box | GPU box *(default)* | Multilingual |
+|---------|-----------|---------------------|--------------|
+| `WHISPER_MODEL` | `distil-large-v3` (slow) or `base` | `distil-large-v3` | `large-v3-turbo` |
+| `WHISPER_DEVICE` | `cpu` | `cuda` | `cuda` |
+| `WHISPER_COMPUTE_TYPE` | `int8` | `float16` | `float16` |
+| `WHISPER_LANGUAGE` | `en` | `en` | `` *(empty = auto-detect)* |
+
+> `distil-large-v3` is English-only. For Hindi/mixed audio switch to a
+> multilingual model (e.g. `large-v3-turbo`) and clear `WHISPER_LANGUAGE` —
+> pre-copy that model's HF cache first.
 
 ### 4) Document OCR (Docling / EasyOCR)
 OCR is fixed (EasyOCR engine). To add a language, pre-copy that EasyOCR language

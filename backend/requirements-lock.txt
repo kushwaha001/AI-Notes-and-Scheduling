@@ -61,6 +61,10 @@ multiprocess==0.70.19
 networkx==3.6.1
 ninja==1.13.0
 numpy==2.4.6
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cuda-runtime-cu12==12.9.79
+nvidia-cudnn-cu12==9.23.2.1
 ollama==0.6.2
 omegaconf==2.3.1
 onnxruntime==1.27.0

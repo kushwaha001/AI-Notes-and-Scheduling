@@ -36,9 +36,14 @@ OLLAMA_KEEP_ALIVE    = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
 MIN_READABLE_CHARS   = int(os.getenv("MIN_READABLE_CHARS", "25"))
 
 # ── Faster-Whisper STT ────────────────────────────────────────
-WHISPER_MODEL        = os.getenv("WHISPER_MODEL",        "medium")
+# distil-large-v3: English-only, near large-v3 accuracy, ~6x faster. On GPU
+# (cuda/float16) it transcribes a short clip in well under a second once warm.
+WHISPER_MODEL        = os.getenv("WHISPER_MODEL",        "distil-large-v3")
 WHISPER_DEVICE       = os.getenv("WHISPER_DEVICE",       "cuda")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+# Language hint skips auto-detection (faster + more reliable). Set to "" to
+# auto-detect if you switch to a multilingual model.
+WHISPER_LANGUAGE     = os.getenv("WHISPER_LANGUAGE", "en")
 
 # ── Qdrant vector DB ──────────────────────────────────────────
 QDRANT_HOST       = os.getenv("QDRANT_HOST",       "http://localhost:6333")
