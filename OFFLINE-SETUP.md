@@ -35,7 +35,7 @@ internet PC. Just zip the project folder (with `offline\`) and carry it across.
 
 | In `offline\` | What it is | Goes to |
 |---------------|------------|---------|
-| `wheels-bundle\` | All Python wheels — exact locked set (Win x64 / Py 3.11), **incl. CUDA cuBLAS/cuDNN for GPU voice** | `pip install` on the App PC |
+| `wheels-bundle\` | All Python wheels — exact locked set (Win x64 / Py 3.11), **incl. GPU `torch` (cu128) for OCR + CUDA cuBLAS/cuDNN for voice** (~4.2 GB) | `pip install` on the App PC |
 | `models\ollama-models\` | `gemma3:4b` + `bge-m3` (+ nomic) blobs | the office server's `.ollama\models` |
 | `models\huggingface-cache\` | Whisper `distil-large-v3` (+ `base` fallback) + Docling layout models | App PC `%USERPROFILE%\.cache\huggingface` |
 | `models\EasyOCR\` | OCR models | App PC `%USERPROFILE%\.EasyOCR` |
@@ -70,6 +70,12 @@ needed if you ever want to **rebuild/refresh** the bundle.
 > On a box with **no GPU**, set `WHISPER_DEVICE=cpu` and `WHISPER_COMPUTE_TYPE=int8`
 > in `.env` — it falls back automatically and still works (just slower).
 
+> **Document extraction (FR-8) also runs OCR on the GPU now.** `torch` is the
+> CUDA 12.8 build (`+cu128`), so Docling's EasyOCR + layout models use the GPU —
+> a multi-page scanned letter parses in seconds instead of minutes. The parser
+> auto-detects CUDA (`AcceleratorDevice.AUTO`) and falls back to CPU if there's no
+> GPU, so nothing breaks on a CPU-only box.
+
 ---
 
 ## Start commands (normal — no scripts)
@@ -102,15 +108,24 @@ The **exact** working package set is captured in `backend\requirements-lock.txt`
 single fast, low-memory pass:
 ```powershell
 cd backend
-python -m pip download -r requirements-lock.txt pip setuptools wheel -d ..\offline\wheels-bundle
+# torch/torchvision are GPU builds (+cu128), which live on the PyTorch index —
+# add it as an extra index so the one pass finds everything.
+python -m pip download -r requirements-lock.txt pip setuptools wheel `
+  --extra-index-url https://download.pytorch.org/whl/cu128 `
+  -d ..\offline\wheels-bundle
 cd ..
 ```
-> All wheels are plain PyPI — **no special CUDA index needed**. Python `torch`
-> stays CPU-only (~123 MB; OCR isn't the bottleneck). The bundle does include the
-> four `nvidia-*-cu12` wheels (~1.3 GB) that **CTranslate2 needs to run Whisper on
-> the GPU**; they're pinned in `requirements-lock.txt` so the command above pulls
-> them automatically. Total bundle ≈ 1.7 GB. (On a CPU-only target these wheels
-> install harmlessly and just go unused.)
+> **GPU build (~4.2 GB total).** `torch==2.11.0+cu128` / `torchvision==0.26.0+cu128`
+> (~2.6 GB) run **document OCR + layout on the GPU**, and the four `nvidia-*-cu12`
+> wheels (CUDA 12.8, ~1.3 GB) let **CTranslate2 run Whisper on the GPU**. All are
+> pinned in `requirements-lock.txt`; the `--extra-index-url` above is what makes
+> the `+cu128` wheels resolvable. The cu128 torch wheel is self-contained (bundles
+> its own CUDA libs).
+>
+> *CPU-only target?* Replace torch with the CPU build instead:
+> `pip download torch==2.12.1 torchvision==0.27.1 -d ..\offline\wheels-bundle`
+> (and drop the `+cu128` lines from the lock). The app auto-detects and falls back
+> to CPU either way — it just runs OCR slower.
 
 ### A2. Frontend dependencies
 ```powershell

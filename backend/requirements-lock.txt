@@ -122,8 +122,8 @@ sympy==1.14.0
 tabulate==0.10.0
 tifffile==2026.3.3
 tokenizers==0.22.2
-torch==2.12.1
-torchvision==0.27.1
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
 tqdm==4.68.3
 transformers==5.12.1
 tree-sitter==0.25.2

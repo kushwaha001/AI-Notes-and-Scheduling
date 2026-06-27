@@ -38,13 +38,26 @@ def _get_converter():
         from docling.document_converter import DocumentConverter, PdfFormatOption
         from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions
         from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.accelerator_options import AcceleratorOptions, AcceleratorDevice
 
-        log.info("Initialising Docling DocumentConverter (EasyOCR)…")
+        # AUTO picks the GPU when a CUDA torch build is installed (OCR + layout
+        # models run on the GPU → much faster extraction), and falls back to CPU
+        # otherwise — so a CPU-only box still works (NFR-9).
+        device = AcceleratorDevice.AUTO
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = AcceleratorDevice.CUDA
+        except Exception:
+            pass
+
+        log.info("Initialising Docling DocumentConverter (EasyOCR, device=%s)…", device.value)
 
         # Use EasyOCR — the auto-installed rapidocr ships a broken model config.
         opts = PdfPipelineOptions()
         opts.do_ocr = True
-        opts.ocr_options = EasyOcrOptions()   # CPU by default; fine on a small GPU box
+        opts.accelerator_options = AcceleratorOptions(device=device)
+        opts.ocr_options = EasyOcrOptions()   # honours accelerator_options.device
 
         fmt = {
             InputFormat.PDF:   PdfFormatOption(pipeline_options=opts),

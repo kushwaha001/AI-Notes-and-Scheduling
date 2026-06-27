@@ -83,7 +83,9 @@ def _ollama_generate(prompt: str) -> str:
             "format": "json",
             "stream": False,
             "keep_alive": OLLAMA_KEEP_ALIVE,   # keep model resident → no cold start
-            "options": {"temperature": 0},
+            # temperature 0 = deterministic; num_predict caps output (the JSON is
+            # small) so the model can't run on generating tokens needlessly.
+            "options": {"temperature": 0, "num_predict": 512},
         },
         timeout=300,
     )
