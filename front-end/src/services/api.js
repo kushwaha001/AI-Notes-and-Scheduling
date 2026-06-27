@@ -77,6 +77,23 @@ export const documentDownloadUrl = (id) => `${BASE}/documents/${id}/download`;
 export const createBackup  = () => req("POST", "/backup");
 export const getLastBackup = () => req("GET", "/backup/last");
 
+// FR-41 — system status (model loaded, GPU/disk, queue depth, last backup)
+export const getSystemStatus = () => req("GET", "/system/status");
+
+// FR-37 — reminders → browser notifications
+export const getDueReminders   = (windowMin = 1) =>
+  req("GET", `/reminders/due?window_min=${windowMin}`).then((r) => r.due || []);
+export const markReminderDelivered = (id) =>
+  req("POST", `/reminders/${id}/delivered`);
+
+// FR-25 — AI-suggested soft links
+export const getLinkSuggestions = (kind, id, topK = 5) =>
+  req("GET", `/links/suggestions/${kind}/${id}?top_k=${topK}`).then((r) => r.suggestions || []);
+export const getAcceptedLinks = (kind, id) =>
+  req("GET", `/links/${kind}/${id}`).then((r) => r.linked || []);
+export const acceptLink = (pair) => req("POST", "/links/accept", pair);
+export const rejectLink = (pair) => req("POST", "/links/reject", pair);
+
 // ── Queue ─────────────────────────────────────────────────────
 export const getQueue = () => req("GET", "/queue").then((r) => r.jobs || []);
 export const getJob   = (id) => req("GET", `/queue/${id}`).then((r) => r.job);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { getNotes, getNote, createNote, updateNote, deleteNote, getNoteVersions, getNoteVersion } from "../services/api";
 import { fmtDate } from "../components/DateInput";
+import RelatedItems from "../components/RelatedItems";
 
 const CLASSIFICATIONS = ["General", "Meeting", "Reply", "Review", "Personal", "Restricted", "Confidential"];
 
@@ -291,6 +292,9 @@ export default function NotesPage() {
                 use <strong>History</strong> to view or restore earlier versions
               </p>
             </div>
+
+            {/* FR-25 — AI-suggested related notes/documents */}
+            <RelatedItems kind="note" id={selected.note_id} />
           </motion.div>
         ) : (
           <div style={{

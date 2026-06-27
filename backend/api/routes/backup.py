@@ -24,8 +24,8 @@ BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 _TABLES = ["users", "documents", "extractions", "events", "event_recurrence",
-           "tasks", "notes", "note_versions", "linked_documents", "reminders",
-           "processing_queue", "audit_log"]
+           "tasks", "notes", "note_versions", "linked_documents", "soft_links",
+           "reminders", "processing_queue", "audit_log"]
 
 
 def _json_default(o):
@@ -34,9 +34,8 @@ def _json_default(o):
     return str(o)
 
 
-@router.post("/backup")
-def create_backup():
-    """Run a backup now."""
+def _run_backup():
+    """Export DB tables + notes to a timestamped folder. Returns (dest, count)."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, ts)
     os.makedirs(dest, exist_ok=True)
@@ -65,14 +64,46 @@ def create_backup():
         else:
             cur.execute("INSERT INTO system_status (model_loaded, last_backup_at) VALUES (FALSE, NOW())")
         conn.commit()
-        return {"status": "ok", "path": dest, "rows": count}
-    except Exception as e:
-        conn.rollback()
-        log.error("Backup failed: %s", e)
-        raise HTTPException(500, str(e))
+        return dest, count
     finally:
         cur.close()
         conn.close()
+
+
+def auto_backup_if_due(max_age_hours: int = 24):
+    """FR-39 — called at startup. Runs a backup only if the newest one is older
+    than max_age_hours (or none exists), so the app keeps a fresh local snapshot
+    without piling up a backup on every restart. Never raises."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT 1 FROM backups
+                WHERE created_at > NOW() - (%s * INTERVAL '1 hour')
+                LIMIT 1
+            """, (max_age_hours,))
+            recent = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+        if recent:
+            return
+        dest, count = _run_backup()
+        log.info("Auto-backup created: %s (%s rows)", dest, count)
+    except Exception as e:
+        log.warning("Auto-backup skipped: %s", e)
+
+
+@router.post("/backup")
+def create_backup():
+    """Run a backup now."""
+    try:
+        dest, count = _run_backup()
+        return {"status": "ok", "path": dest, "rows": count}
+    except Exception as e:
+        log.error("Backup failed: %s", e)
+        raise HTTPException(500, str(e))
 
 
 @router.get("/backup/last")

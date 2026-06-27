@@ -44,6 +44,20 @@ You still install **Python 3.11**, **PostgreSQL**, and **Ollama** from
 `offline\installers\` (add those installers before sending). Part A below is only
 needed if you ever want to **rebuild/refresh** the bundle.
 
+> **No wheel changes for the latest features.** Reminders/browser notifications
+> (FR-37), AI-suggested soft links (FR-25), the auto-backup (FR-39) and the
+> richer status page (FR-41 — model state, GPU, disk, queue depth) were all built
+> on the **standard library + packages already in the bundle**. Nothing new to
+> download; the existing `wheels-bundle\` is complete.
+>
+> - The status page reads GPU usage via **`nvidia-smi`**, which ships with the
+>   NVIDIA driver — no Python package. On a box with no GPU it simply shows
+>   "inference runs on the Ollama server" instead of failing.
+> - The new `soft_links` table is created automatically on first startup
+>   (idempotent schema) — no manual migration.
+> - Browser notifications need no install; the browser prompts for permission
+>   on first load, and the dashboard remains the reliable fallback.
+
 ---
 
 ## Start commands (normal — no scripts)

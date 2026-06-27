@@ -7,8 +7,9 @@ import {
 
 import { AnimatePresence, motion } from "framer-motion";
 
-import AppShell      from "./components/AppShell";
-import ErrorBoundary from "./components/ErrorBoundary";
+import AppShell         from "./components/AppShell";
+import ErrorBoundary    from "./components/ErrorBoundary";
+import ReminderNotifier from "./components/ReminderNotifier";
 
 import DashboardPage    from "./pages/DashboardPage";
 import UploadPage       from "./pages/UploadPage";
@@ -70,6 +71,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <ReminderNotifier />
       <AppShell>
         <AnimatedRoutes />
       </AppShell>

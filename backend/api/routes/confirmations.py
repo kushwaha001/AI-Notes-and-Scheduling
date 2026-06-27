@@ -31,6 +31,10 @@ def confirm_item(item: ConfirmItem):
             ))
             event_id = cur.fetchone()["id"]
 
+            # FR-17/FR-37 — persist the chosen reminder offsets for this event
+            from api.routes.reminders import insert_reminders
+            insert_reminders(cur, event_id, item.reminders)
+
             cur.execute("""
                 INSERT INTO linked_documents
                     (source_type, source_id, entity_type, entity_id, link_type, confirmed)

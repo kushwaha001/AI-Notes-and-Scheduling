@@ -23,6 +23,7 @@ from api.routes import (
     confirmations, queue, search,
     dashboard, audit, notes,
     trash, timeline, ask, backup,
+    system, reminders, links,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,12 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as exc:
         log.error("Startup DB init failed (continuing anyway): %s", exc)
+    # FR-39 — keep a fresh local snapshot (only runs if none in last 24h)
+    try:
+        from api.routes.backup import auto_backup_if_due
+        auto_backup_if_due()
+    except Exception as exc:
+        log.warning("Startup auto-backup skipped: %s", exc)
     yield
 
 
@@ -70,6 +77,9 @@ app.include_router(trash.router)
 app.include_router(timeline.router)
 app.include_router(ask.router)
 app.include_router(backup.router)
+app.include_router(system.router)
+app.include_router(reminders.router)
+app.include_router(links.router)
 
 
 # ── SYSTEM ENDPOINTS ──────────────────────────────────────────

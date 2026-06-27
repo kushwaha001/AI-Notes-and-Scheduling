@@ -233,6 +233,24 @@ CREATE TABLE IF NOT EXISTS backups (
 -- FR-24: reference number on documents (deterministic auto-linking)
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS ref_number TEXT;
 CREATE INDEX IF NOT EXISTS idx_documents_ref ON documents(ref_number);
+
+-- FR-25: AI-suggested "soft" links between content items (notes/documents).
+-- Never auto-applied — the user accepts or rejects each suggestion.
+CREATE TABLE IF NOT EXISTS soft_links (
+    id         SERIAL PRIMARY KEY,
+    a_kind     TEXT NOT NULL CHECK (a_kind IN ('document','note')),
+    a_id       INT  NOT NULL,
+    b_kind     TEXT NOT NULL CHECK (b_kind IN ('document','note')),
+    b_id       INT  NOT NULL,
+    score      NUMERIC(6,4),
+    status     TEXT NOT NULL DEFAULT 'suggested'
+                   CHECK (status IN ('suggested','accepted','rejected')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    decided_at TIMESTAMP,
+    UNIQUE (a_kind, a_id, b_kind, b_id)
+);
+CREATE INDEX IF NOT EXISTS idx_soft_links_a ON soft_links(a_kind, a_id);
+CREATE INDEX IF NOT EXISTS idx_soft_links_b ON soft_links(b_kind, b_id);
 """
 
 
