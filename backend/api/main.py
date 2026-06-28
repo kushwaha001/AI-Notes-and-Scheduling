@@ -23,7 +23,7 @@ from api.routes import (
     confirmations, queue, search,
     dashboard, audit, notes,
     trash, timeline, ask, backup,
-    system, reminders, links,
+    system, reminders, links, auth,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -80,6 +80,7 @@ app.include_router(backup.router)
 app.include_router(system.router)
 app.include_router(reminders.router)
 app.include_router(links.router)
+app.include_router(auth.router)
 
 
 # ── SYSTEM ENDPOINTS ──────────────────────────────────────────

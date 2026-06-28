@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS users (
 INSERT INTO users (id, username) VALUES (1, 'default')
 ON CONFLICT (id) DO NOTHING;
 
+-- v2 multi-user: link local users to their Keycloak identity (JIT-provisioned
+-- on first login). Legacy single-user data stays owned by user id 1 ('default').
+ALTER TABLE users ADD COLUMN IF NOT EXISTS keycloak_sub TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email        TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role         TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login   TIMESTAMP;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_keycloak_sub
+    ON users(keycloak_sub) WHERE keycloak_sub IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS documents (
     id             SERIAL PRIMARY KEY,
     users_id       INT NOT NULL REFERENCES users(id),
@@ -229,6 +239,13 @@ CREATE TABLE IF NOT EXISTS backups (
     item_count  INT,
     created_at  TIMESTAMP DEFAULT NOW()
 );
+
+-- v2 multi-user: a file hash must be unique *per user*, not globally, so two
+-- users can independently upload the same document. Drop the global unique that
+-- the inline `file_hash TEXT UNIQUE` created and replace with a composite one.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_file_hash_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_user_hash
+    ON documents(users_id, file_hash);
 
 -- FR-24: reference number on documents (deterministic auto-linking)
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS ref_number TEXT;

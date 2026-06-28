@@ -1,12 +1,14 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from typing import Optional
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Queue"])
 
 
 @router.post("/queue/process")
-def process_queue(background_tasks: BackgroundTasks):
+def process_queue(background_tasks: BackgroundTasks,
+                  user: CurrentUser = Depends(current_user)):
     """FR-8/NFR-9 — process any waiting documents now (e.g. once AI is back up)."""
     from api.ai.pipeline import ai_ready, process_waiting
     if not ai_ready():
@@ -16,7 +18,8 @@ def process_queue(background_tasks: BackgroundTasks):
 
 
 @router.get("/queue")
-def list_queue(status: Optional[str] = None):
+def list_queue(status: Optional[str] = None,
+               user: CurrentUser = Depends(current_user)):
     """NFR-6 — all jobs in processing queue with status."""
     conn = get_db()
     cur  = conn.cursor()
@@ -26,10 +29,11 @@ def list_queue(status: Optional[str] = None):
                    d.filename, d.file_type
             FROM   processing_queue pq
             JOIN   documents d ON d.id = pq.document_id
+            WHERE  d.users_id = %s
         """
-        params = []
+        params = [user["id"]]
         if status:
-            query += " WHERE pq.status = %s"
+            query += " AND pq.status = %s"
             params.append(status)
         query += " ORDER BY pq.queued_at DESC"
         cur.execute(query, params)
@@ -40,7 +44,7 @@ def list_queue(status: Optional[str] = None):
 
 
 @router.get("/queue/{job_id}")
-def get_queue_job(job_id: int):
+def get_queue_job(job_id: int, user: CurrentUser = Depends(current_user)):
     """NFR-2 — status of one specific job."""
     conn = get_db()
     cur  = conn.cursor()
@@ -49,8 +53,8 @@ def get_queue_job(job_id: int):
             SELECT pq.*, d.filename
             FROM   processing_queue pq
             JOIN   documents d ON d.id = pq.document_id
-            WHERE  pq.id = %s
-        """, (job_id,))
+            WHERE  pq.id = %s AND d.users_id = %s
+        """, (job_id, user["id"]))
         job = cur.fetchone()
         if not job:
             raise HTTPException(404, "Job not found.")
@@ -61,7 +65,7 @@ def get_queue_job(job_id: int):
 
 
 @router.post("/queue/{job_id}/retry")
-def retry_queue_job(job_id: int):
+def retry_queue_job(job_id: int, user: CurrentUser = Depends(current_user)):
     """NFR-2 — manually retry a failed job."""
     conn = get_db()
     cur  = conn.cursor()
@@ -72,8 +76,9 @@ def retry_queue_job(job_id: int):
                    retry_count = retry_count + 1,
                    processed_at = NULL
             WHERE  id = %s AND status IN ('failed', 'cancelled')
+              AND  document_id IN (SELECT id FROM documents WHERE users_id = %s)
             RETURNING id, retry_count
-        """, (job_id,))
+        """, (job_id, user["id"]))
         row = cur.fetchone()
         if not row:
             raise HTTPException(400, "Job is not in a retryable state (must be failed or cancelled).")
@@ -90,7 +95,7 @@ def retry_queue_job(job_id: int):
 
 
 @router.delete("/queue/{job_id}")
-def cancel_queue_job(job_id: int):
+def cancel_queue_job(job_id: int, user: CurrentUser = Depends(current_user)):
     """NFR-6 — cancel a waiting job."""
     conn = get_db()
     cur  = conn.cursor()
@@ -99,8 +104,9 @@ def cancel_queue_job(job_id: int):
             UPDATE processing_queue
             SET status = 'cancelled'
             WHERE id = %s AND status = 'waiting'
+              AND document_id IN (SELECT id FROM documents WHERE users_id = %s)
             RETURNING id
-        """, (job_id,))
+        """, (job_id, user["id"]))
         row = cur.fetchone()
         if not row:
             raise HTTPException(400, "Job is not cancellable (must be in waiting state).")

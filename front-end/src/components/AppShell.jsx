@@ -2,8 +2,9 @@ import Sidebar from "./Sidebar";
 import BackgroundBlobs from "./BackgroundBlobs";
 import NotificationManager from "./NotificationManager";
 import BackendStatus from "./BackendStatus";
+import UserMenu from "./UserMenu";
 
-function AppShell({ children }) {
+function AppShell({ children, user }) {
   return (
     <div
       style={{
@@ -18,6 +19,7 @@ function AppShell({ children }) {
       <BackgroundBlobs />
       <NotificationManager />
       <BackendStatus />
+      <UserMenu user={user} />
 
       <Sidebar />
 

@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from api.models import ManualTask, TaskUpdate
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Tasks"])
 
@@ -20,16 +21,16 @@ def _parse_date(s):
 
 
 @router.get("/tasks/open")
-def tasks_open():
+def tasks_open(user: CurrentUser = Depends(current_user)):
     """FR-22, Dashboard — open tasks ordered by due date."""
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute("""
             SELECT * FROM tasks
-            WHERE status = 'open' AND deleted_at IS NULL
+            WHERE status = 'open' AND deleted_at IS NULL AND users_id = %s
             ORDER BY due_date NULLS LAST, created_at
-        """)
+        """, (user["id"],))
         return {"tasks": cur.fetchall()}
     finally:
         cur.close()
@@ -40,13 +41,14 @@ def tasks_open():
 def list_tasks(
     status  : Optional[str] = None,
     category: Optional[str] = None,
+    user: CurrentUser = Depends(current_user),
 ):
     """FR-22 — list tasks with filters."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        query = "SELECT * FROM tasks WHERE deleted_at IS NULL"
-        params = []
+        query = "SELECT * FROM tasks WHERE deleted_at IS NULL AND users_id = %s"
+        params = [user["id"]]
         if status:
             query += " AND status = %s"
             params.append(status)
@@ -62,14 +64,14 @@ def list_tasks(
 
 
 @router.get("/tasks/{task_id}")
-def get_task(task_id: int):
+def get_task(task_id: int, user: CurrentUser = Depends(current_user)):
     """FR-22 — single task detail."""
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute(
-            "SELECT * FROM tasks WHERE id = %s AND deleted_at IS NULL",
-            (task_id,)
+            "SELECT * FROM tasks WHERE id = %s AND users_id = %s AND deleted_at IS NULL",
+            (task_id, user["id"])
         )
         task = cur.fetchone()
         if not task:
@@ -81,16 +83,16 @@ def get_task(task_id: int):
 
 
 @router.post("/tasks/manual")
-def create_task_manual(task: ManualTask):
+def create_task_manual(task: ManualTask, user: CurrentUser = Depends(current_user)):
     """FR-7 — manual task creation. No AI. Always works."""
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute("""
             INSERT INTO tasks (users_id, title, due_date, classification, source, status)
-            VALUES (1, %s, %s, %s, 'manual', 'open')
+            VALUES (%s, %s, %s, %s, 'manual', 'open')
             RETURNING id
-        """, (task.title, _parse_date(task.due_date), task.category or None))
+        """, (user["id"], task.title, _parse_date(task.due_date), task.category or None))
         task_id = cur.fetchone()["id"]
 
         cur.execute("""
@@ -109,7 +111,8 @@ def create_task_manual(task: ManualTask):
 
 
 @router.patch("/tasks/{task_id}")
-def update_task(task_id: int, update: TaskUpdate):
+def update_task(task_id: int, update: TaskUpdate,
+                user: CurrentUser = Depends(current_user)):
     """FR-22 — edit task fields."""
     conn = get_db()
     cur = conn.cursor()
@@ -124,11 +127,14 @@ def update_task(task_id: int, update: TaskUpdate):
             return {"status": "no changes", "task_id": task_id}
 
         set_clause = ", ".join(f"{k} = %s" for k in fields)
-        values = list(fields.values()) + [task_id]
+        values = list(fields.values()) + [task_id, user["id"]]
         cur.execute(
-            f"UPDATE tasks SET {set_clause} WHERE id = %s AND deleted_at IS NULL",
+            f"UPDATE tasks SET {set_clause} "
+            f"WHERE id = %s AND users_id = %s AND deleted_at IS NULL",
             values
         )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Task not found.")
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('edited', 'task', %s, %s)
@@ -136,6 +142,9 @@ def update_task(task_id: int, update: TaskUpdate):
 
         conn.commit()
         return {"status": "updated", "task_id": task_id}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))
@@ -145,21 +154,26 @@ def update_task(task_id: int, update: TaskUpdate):
 
 
 @router.delete("/tasks/{task_id}")
-def delete_task(task_id: int):
+def delete_task(task_id: int, user: CurrentUser = Depends(current_user)):
     """FR-22 — soft delete."""
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute("""
             UPDATE tasks SET status = 'trashed', deleted_at = NOW()
-            WHERE id = %s AND deleted_at IS NULL
-        """, (task_id,))
+            WHERE id = %s AND users_id = %s AND deleted_at IS NULL
+        """, (task_id, user["id"]))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Task not found.")
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('trashed', 'task', %s, 'Soft deleted by user')
         """, (task_id,))
         conn.commit()
         return {"status": "deleted", "task_id": task_id}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))

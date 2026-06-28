@@ -18,11 +18,12 @@ return empty rather than erroring.
 import os
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.config import NOTES_DIR
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Links"])
 log = logging.getLogger(__name__)
@@ -43,19 +44,36 @@ def _canonical(a_kind, a_id, b_kind, b_id):
     return b_kind, b_id, a_kind, a_id
 
 
-def _item_text(kind: str, item_id: int):
-    """Return (title, text) for a note or document, or (None, None) if missing."""
+def _owns(kind: str, item_id: int, user_id: int) -> bool:
+    """True if the given note/document belongs to user_id."""
+    table = {"document": "documents", "note": "notes"}.get(kind)
+    if not table:
+        return False
+    conn = get_db(); cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT 1 FROM {table} WHERE id = %s AND users_id = %s",
+                    (item_id, user_id))
+        return cur.fetchone() is not None
+    finally:
+        cur.close(); conn.close()
+
+
+def _item_text(kind: str, item_id: int, user_id: int):
+    """Return (title, text) for a note or document owned by user_id, else (None, None)."""
     if kind == "document":
         conn = get_db(); cur = conn.cursor()
         try:
             cur.execute(
-                "SELECT filename, full_text FROM documents WHERE id = %s AND status != 'trashed'",
-                (item_id,))
+                "SELECT filename, full_text FROM documents "
+                "WHERE id = %s AND users_id = %s AND status != 'trashed'",
+                (item_id, user_id))
             row = cur.fetchone()
             return (row["filename"], row["full_text"]) if row else (None, None)
         finally:
             cur.close(); conn.close()
     if kind == "note":
+        if not _owns("note", item_id, user_id):
+            return (None, None)
         path = os.path.join(NOTES_DIR, f"{item_id}.md")
         if not os.path.isfile(path):
             return (None, None)
@@ -68,9 +86,10 @@ def _item_text(kind: str, item_id: int):
 
 
 @router.get("/links/suggestions/{kind}/{item_id}")
-def suggestions(kind: str, item_id: int, top_k: int = 5):
+def suggestions(kind: str, item_id: int, top_k: int = 5,
+                user: CurrentUser = Depends(current_user)):
     """FR-25 — semantically related items the user might want to link."""
-    title, text = _item_text(kind, item_id)
+    title, text = _item_text(kind, item_id, user["id"])
     if not text:
         return {"suggestions": []}
 
@@ -79,7 +98,7 @@ def suggestions(kind: str, item_id: int, top_k: int = 5):
         from api.ai.vectorstore import search
         if not embed_available():
             return {"suggestions": [], "reason": "embedding model offline"}
-        hits = search(text[:2000], top_k=top_k + 6)
+        hits = search(text[:2000], top_k=top_k + 6, user_id=user["id"])
     except Exception as e:
         log.warning("Soft-link search failed: %s", e)
         return {"suggestions": [], "reason": "vector store unavailable"}
@@ -120,8 +139,10 @@ def suggestions(kind: str, item_id: int, top_k: int = 5):
 
 
 @router.post("/links/accept")
-def accept(d: LinkDecision):
+def accept(d: LinkDecision, user: CurrentUser = Depends(current_user)):
     """User confirms a suggested link (FR-25)."""
+    if not (_owns(d.a_kind, d.a_id, user["id"]) and _owns(d.b_kind, d.b_id, user["id"])):
+        raise HTTPException(404, "Item not found.")
     a_kind, a_id, b_kind, b_id = _canonical(d.a_kind, d.a_id, d.b_kind, d.b_id)
     conn = get_db(); cur = conn.cursor()
     try:
@@ -138,8 +159,10 @@ def accept(d: LinkDecision):
 
 
 @router.post("/links/reject")
-def reject(d: LinkDecision):
+def reject(d: LinkDecision, user: CurrentUser = Depends(current_user)):
     """User dismisses a suggestion — it won't be suggested again (FR-25)."""
+    if not (_owns(d.a_kind, d.a_id, user["id"]) and _owns(d.b_kind, d.b_id, user["id"])):
+        raise HTTPException(404, "Item not found.")
     a_kind, a_id, b_kind, b_id = _canonical(d.a_kind, d.a_id, d.b_kind, d.b_id)
     conn = get_db(); cur = conn.cursor()
     try:
@@ -156,8 +179,11 @@ def reject(d: LinkDecision):
 
 
 @router.get("/links/{kind}/{item_id}")
-def accepted_links(kind: str, item_id: int):
+def accepted_links(kind: str, item_id: int,
+                   user: CurrentUser = Depends(current_user)):
     """Accepted soft links for an item, resolved to titles for display."""
+    if not _owns(kind, item_id, user["id"]):
+        raise HTTPException(404, "Item not found.")
     conn = get_db(); cur = conn.cursor()
     try:
         cur.execute("""
@@ -172,6 +198,6 @@ def accepted_links(kind: str, item_id: int):
     linked = []
     for r in rows:
         other = (r["b_kind"], r["b_id"]) if (r["a_kind"], r["a_id"]) == (kind, item_id) else (r["a_kind"], r["a_id"])
-        title, _ = _item_text(*other)
+        title, _ = _item_text(other[0], other[1], user["id"])
         linked.append({"kind": other[0], "id": other[1], "title": title or f"{other[0]} {other[1]}"})
     return {"linked": linked}

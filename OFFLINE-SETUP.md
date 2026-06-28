@@ -12,6 +12,46 @@ from the copied files. You start the backend and frontend with **plain commands*
 
 ---
 
+## 📦 What to transfer (verified 2026-06-28)
+
+Zip the **entire project folder** and carry it across. The items below are the
+ones that **don't live in git** — they will NOT be present in a fresh `git clone`,
+so they must be physically copied. Everything else (source code, `keycloak\`
+config, this guide) travels with the folder automatically.
+
+| Path | Size | Why it's needed | Status |
+|------|------|-----------------|--------|
+| `offline\wheels-bundle\` | **4.16 GB** (147 wheels) | All backend Python deps incl. GPU torch + auth wheels (PyJWT/cryptography). Verified: installs with `--no-index`, exit 0. | ✅ ready |
+| `offline\models\` | **6.59 GB** | AI model caches: `ollama-models` (LLM+embeddings), `huggingface-cache` (Whisper+Docling), `EasyOCR` | ✅ ready |
+| `front-end\node_modules\` | **182 MB** | Frontend deps — **includes `keycloak-js`** (new in v2). `npm install` won't run offline, so this folder must be copied. | ✅ ready |
+| `backend\.env` | <1 KB | DB password + service config. **Not in git** — copy your working file, or recreate from `.env.example` on the target (see C8). | ⚠️ copy it |
+| `offline\installers\` | varies | **Python 3.11**, **PostgreSQL**, **Ollama** installers — only if the office PC doesn't already have them installed. | ⚠️ **add before sending** |
+
+**Optional — only if you will turn on Keycloak auth (it's OFF by default):**
+
+| Path | Size | Why |
+|------|------|-----|
+| A Java 17+ runtime (in `offline\installers\`) | ~50 MB | run Keycloak (already present on the dev PC, may be absent on the office PC) |
+| Keycloak server zip → unzip to `keycloak\dist\` | ~250 MB | the auth server itself (not a Python package) |
+
+> **Total core payload ≈ 11 GB** (wheels + models + node_modules). Auth is off by
+> default, so the optional Keycloak rows are **not** needed for tomorrow unless you
+> intend to enable multi-user login.
+
+**Quick pre-flight on the internet PC before you zip:**
+```powershell
+# 1) wheels resolve offline (must end with exit code 0)
+backend\venv\Scripts\python -m pip install --no-index `
+  --find-links offline\wheels-bundle -r backend\requirements-lock.txt `
+  --dry-run --ignore-installed
+# 2) the new frontend dep is present
+Test-Path front-end\node_modules\keycloak-js     # -> True
+# 3) installers staged (or confirm the office PC already has them)
+Get-ChildItem offline\installers
+```
+
+---
+
 ## What runs where
 
 | Component | Where it runs | How it gets there offline |
@@ -22,6 +62,11 @@ from the copied files. You start the backend and frontend with **plain commands*
 | **Ollama** (LLM + embeddings) | Office server | Install Ollama + copy the model blobs |
 | **Qdrant** (vector index) | App PC (embedded) | Bundled with the Python wheels — no server needed |
 | Docling / Whisper models | App PC | Copy the model caches |
+| **Keycloak** (v2 auth — *optional*) | App PC / office server | JRE + Keycloak dist (add to bundle — see "Keycloak" section) |
+
+> **Auth is optional and off by default.** With `AUTH_ENABLED=false` the app runs
+> single-user exactly like v1 — you can ignore Keycloak entirely. Turn it on only
+> when you want per-user accounts (see the **Keycloak (v2 multi-user)** section).
 
 The app talks to Ollama over HTTP (`OLLAMA_HOST`), so Ollama can live on the
 office server while the app runs on the same PC or another box on the Dev Lan.
@@ -44,7 +89,15 @@ You still install **Python 3.11**, **PostgreSQL**, and **Ollama** from
 `offline\installers\` (add those installers before sending). Part A below is only
 needed if you ever want to **rebuild/refresh** the bundle.
 
-> **No wheel changes for the latest features.** Reminders/browser notifications
+> **v2 auth added four small wheels.** Keycloak token validation needs
+> `PyJWT`, `cryptography`, `cffi`, `pycparser` — these are now in
+> `wheels-bundle\` and `requirements-lock.txt` (all Win x64 / Py 3.11). They
+> install with the same `--no-index` command; no other change. The **Keycloak
+> server itself is NOT a Python package** — it's a separate Java service (see the
+> Keycloak section). If you keep `AUTH_ENABLED=false`, these wheels are installed
+> but unused.
+>
+> **No wheel changes for the earlier features.** Reminders/browser notifications
 > (FR-37), AI-suggested soft links (FR-25), the auto-backup (FR-39) and the
 > richer status page (FR-41 — model state, GPU, disk, queue depth) were all built
 > on the **standard library + packages already in the bundle**. Nothing new to
@@ -258,6 +311,13 @@ WHISPER_MODEL=distil-large-v3
 WHISPER_DEVICE=cuda
 WHISPER_COMPUTE_TYPE=float16
 WHISPER_LANGUAGE=en
+
+# Authentication (v2). Leave false for single-user (v1 behavior). To turn on
+# multi-user, set true AND start Keycloak (see the Keycloak section below).
+AUTH_ENABLED=false
+KEYCLOAK_URL=http://localhost:8080
+KEYCLOAK_REALM=udaan
+KEYCLOAK_CLIENT_ID=udaan-frontend
 ```
 If the frontend and backend run on the **same** PC, the Vite proxy needs the
 backend on `localhost:9000` — keep that. `OLLAMA_HOST` can point anywhere on the
@@ -267,6 +327,69 @@ Dev Lan.
 Make sure PostgreSQL is running (Services → `postgresql-x64-…`), then use the two
 **Start commands** at the top of this guide. The backend creates `udaan_db` and
 all tables on first run.
+
+---
+
+## Keycloak (v2 multi-user auth) — optional
+
+Skip this whole section to run single-user (the default). Turn it on when you
+want each person to log in and see only their own documents, notes, events and
+tasks. The data model was already per-user; enabling auth simply scopes every
+request to the logged-in user. **Admin-only** pages (System status, Audit log,
+Backup) require the `admin` realm role.
+
+### What you must add to the bundle (one-time, on the internet PC)
+Keycloak is a Java service — it is **not** a Python wheel. Add two things to
+`offline\installers\` before transferring:
+
+1. **A Java runtime** — JRE/JDK 17+ (e.g. Temurin/Adoptium MSI, or a portable zip).
+2. **The Keycloak distribution** — `keycloak-XX.X.X.zip` from
+   <https://www.keycloak.org/downloads> (the "Server" zip).
+
+The realm definition, run script and client config already ship in the repo
+under `keycloak\` (`udaan-realm.json`, `run-keycloak.ps1`).
+
+### Install & run on the office PC
+```powershell
+# 1. Install the JRE (or unzip it) so `java -version` works, or set JAVA_HOME.
+# 2. Unzip the Keycloak distribution into  keycloak\dist\
+#    (so keycloak\dist\bin\kc.bat exists).
+# 3. Start Keycloak (imports the udaan realm + udaan-frontend client on first run):
+cd keycloak
+powershell -ExecutionPolicy Bypass -File .\run-keycloak.ps1 -AdminUser admin -AdminPassword "CHANGE-ME"
+```
+Keycloak comes up on <http://localhost:8080>. By default it uses its own
+file-based store (persists across restarts). To reuse the existing PostgreSQL
+instead, create a `keycloak` database and run with `-UsePostgres`.
+
+### Create users
+1. Open <http://localhost:8080> → **Administration Console** → sign in with the
+   admin/password above.
+2. Switch the realm (top-left) from *master* to **udaan**.
+3. **Users → Add user** → set username/email → **Credentials** tab → set a
+   password (turn *Temporary* off).
+4. For anyone who needs the System/Audit/Backup pages: **Role mapping → Assign
+   role → `admin`**. Everyone else gets `user` automatically.
+
+### Flip it on
+```ini
+# backend\.env
+AUTH_ENABLED=true
+KEYCLOAK_URL=http://localhost:8080      # or the server's hostname/IP on the LAN
+KEYCLOAK_REALM=udaan
+KEYCLOAK_CLIENT_ID=udaan-frontend
+```
+Restart the backend. The frontend auto-detects this via `GET /auth/config` and
+redirects to the Keycloak login page; after login it attaches the access token to
+every API call and refreshes it automatically. A **Sign out** button appears
+top-right. To revert to single-user, set `AUTH_ENABLED=false` and restart — no
+data is lost (existing single-user data stays owned by the built-in `default`
+user; new Keycloak users start with their own empty workspace).
+
+> **Redirect URIs:** `udaan-realm.json` allows `http://localhost:5173` and
+> `:3000`. If you serve the frontend from another host/port, edit the client's
+> *Valid redirect URIs* / *Web origins* in the admin console (Clients →
+> udaan-frontend).
 
 ---
 

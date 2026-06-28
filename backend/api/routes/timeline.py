@@ -6,31 +6,33 @@ with tap-through to source.
 import os
 from datetime import datetime, date
 from collections import defaultdict
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from api.db import get_db
 from api.config import NOTES_DIR
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Timeline"])
 
 
 @router.get("/timeline")
-def timeline(limit: int = 200):
+def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
     """Merge events, tasks and notes into one chronological list (newest first).
     Recurring event series are collapsed to a single entry (with an occurrence
     count) so the timeline isn't flooded by repeats. ALL tasks and notes are
     always returned so they never get hidden."""
     conn = get_db()
     cur = conn.cursor()
+    uid = user["id"]
     items = []
     try:
         # Non-recurring events — listed individually (most recent `limit`)
         cur.execute("""
             SELECT id, title, event_date, event_time, venue, classification, source
             FROM events
-            WHERE status != 'trashed' AND recurrence_id IS NULL
+            WHERE status != 'trashed' AND recurrence_id IS NULL AND users_id = %s
             ORDER BY event_date DESC NULLS LAST
             LIMIT %s
-        """, (limit,))
+        """, (uid, limit))
         for e in cur.fetchall():
             items.append({
                 "kind": "event",
@@ -50,8 +52,8 @@ def timeline(limit: int = 200):
         cur.execute("""
             SELECT id, title, event_date, event_time, venue, classification, source, recurrence_id
             FROM events
-            WHERE status != 'trashed' AND recurrence_id IS NOT NULL
-        """)
+            WHERE status != 'trashed' AND recurrence_id IS NOT NULL AND users_id = %s
+        """, (uid,))
         series = defaultdict(list)
         for e in cur.fetchall():
             series[e["recurrence_id"]].append(e)
@@ -77,8 +79,8 @@ def timeline(limit: int = 200):
         # Tasks — keyed by due_date (fall back to created_at)
         cur.execute("""
             SELECT id, title, due_date, status, classification, source, created_at
-            FROM tasks WHERE deleted_at IS NULL
-        """)
+            FROM tasks WHERE deleted_at IS NULL AND users_id = %s
+        """, (uid,))
         for t in cur.fetchall():
             when = t["due_date"] or t["created_at"]
             items.append({
@@ -97,8 +99,8 @@ def timeline(limit: int = 200):
         # Notes — DB metadata, timestamped by the Markdown file
         cur.execute("""
             SELECT id, title, classification, created_at
-            FROM notes WHERE status = 'active'
-        """)
+            FROM notes WHERE status = 'active' AND users_id = %s
+        """, (uid,))
         for n in cur.fetchall():
             path = os.path.join(NOTES_DIR, f"{n['id']}.md")
             when = (datetime.fromtimestamp(os.stat(path).st_mtime)

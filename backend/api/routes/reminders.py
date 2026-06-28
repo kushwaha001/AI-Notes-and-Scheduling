@@ -16,8 +16,9 @@ import re
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Reminders"])
 log = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ def insert_reminders(cur, event_id: int, labels) -> int:
 
 
 @router.get("/reminders/due")
-def reminders_due(window_min: int = 1):
+def reminders_due(window_min: int = 1, user: CurrentUser = Depends(current_user)):
     """Reminders whose fire-time has arrived (event datetime − offset ≤ now) and
     that haven't been delivered yet. The frontend polls this and shows a browser
     notification for each, then POSTs /reminders/{id}/delivered.
@@ -92,8 +93,9 @@ def reminders_due(window_min: int = 1):
             WHERE r.delivered = FALSE
               AND e.status != 'trashed'
               AND e.deleted_at IS NULL
+              AND e.users_id = %s
             ORDER BY event_at
-        """)
+        """, (user["id"],))
         rows = cur.fetchall()
     finally:
         cur.close()
@@ -121,12 +123,16 @@ def reminders_due(window_min: int = 1):
 
 
 @router.post("/reminders/{reminder_id}/delivered")
-def mark_delivered(reminder_id: int):
+def mark_delivered(reminder_id: int, user: CurrentUser = Depends(current_user)):
     """Mark a reminder as shown so it never fires again."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE reminders SET delivered = TRUE WHERE id = %s", (reminder_id,))
+        cur.execute("""
+            UPDATE reminders SET delivered = TRUE
+            WHERE id = %s
+              AND event_id IN (SELECT id FROM events WHERE users_id = %s)
+        """, (reminder_id, user["id"]))
         conn.commit()
         return {"status": "delivered", "id": reminder_id}
     finally:

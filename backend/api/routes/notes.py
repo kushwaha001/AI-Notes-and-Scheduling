@@ -13,12 +13,21 @@ import shutil
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from api.config import NOTES_DIR
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Notes"])
+
+
+def _assert_owned(cur, note_id, user_id):
+    """Raise 404 unless the active note belongs to user_id."""
+    cur.execute("SELECT 1 FROM notes WHERE id = %s AND users_id = %s AND status = 'active'",
+                (note_id, user_id))
+    if cur.fetchone() is None:
+        raise HTTPException(404, "Note not found.")
 
 VERSIONS_DIR = os.path.join(NOTES_DIR, ".versions")
 TRASH_DIR    = os.path.join(NOTES_DIR, ".trash")
@@ -57,13 +66,15 @@ def _write_body(note_id, title, content):
 
 
 @router.get("/notes")
-def list_notes(classification: Optional[str] = None):
+def list_notes(classification: Optional[str] = None,
+               user: CurrentUser = Depends(current_user)):
     """FR-38 — list active notes (metadata from DB, newest first)."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        query = "SELECT id, title, classification, created_at FROM notes WHERE status = 'active'"
-        params = []
+        query = ("SELECT id, title, classification, created_at FROM notes "
+                 "WHERE status = 'active' AND users_id = %s")
+        params = [user["id"]]
         if classification:
             query += " AND classification = %s"
             params.append(classification)
@@ -87,12 +98,13 @@ def list_notes(classification: Optional[str] = None):
 
 
 @router.get("/notes/{note_id}")
-def get_note(note_id: int):
+def get_note(note_id: int, user: CurrentUser = Depends(current_user)):
     """FR-38 — read one note's metadata + Markdown body."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT * FROM notes WHERE id = %s AND status = 'active'", (note_id,))
+        cur.execute("SELECT * FROM notes WHERE id = %s AND users_id = %s AND status = 'active'",
+                    (note_id, user["id"]))
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "Note not found.")
@@ -113,15 +125,15 @@ def get_note(note_id: int):
 
 
 @router.post("/notes")
-def create_note(note: NotePayload):
+def create_note(note: NotePayload, user: CurrentUser = Depends(current_user)):
     """FR-5 — create a note (DB row + Markdown file + audit)."""
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute("""
             INSERT INTO notes (users_id, title, classification, status)
-            VALUES (1, %s, %s, 'active') RETURNING id
-        """, (note.title, note.classification or "General"))
+            VALUES (%s, %s, %s, 'active') RETURNING id
+        """, (user["id"], note.title, note.classification or "General"))
         nid = cur.fetchone()["id"]
 
         _write_body(nid, note.title, note.content)
@@ -142,14 +154,13 @@ def create_note(note: NotePayload):
 
 
 @router.put("/notes/{note_id}")
-def update_note(note_id: int, note: NotePayload):
+def update_note(note_id: int, note: NotePayload,
+                user: CurrentUser = Depends(current_user)):
     """FR-38/FR-39 — update body, snapshot prior version, audit the edit."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id FROM notes WHERE id = %s AND status = 'active'", (note_id,))
-        if not cur.fetchone():
-            raise HTTPException(404, "Note not found.")
+        _assert_owned(cur, note_id, user["id"])
 
         _snapshot(note_id)                       # FR-39 version history
         _write_body(note_id, note.title, note.content)
@@ -184,8 +195,15 @@ def update_note(note_id: int, note: NotePayload):
 
 
 @router.get("/notes/{note_id}/versions")
-def list_versions(note_id: int):
+def list_versions(note_id: int, user: CurrentUser = Depends(current_user)):
     """FR-39 — list saved versions of a note (newest first)."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        _assert_owned(cur, note_id, user["id"])
+    finally:
+        cur.close()
+        conn.close()
     vdir = os.path.join(VERSIONS_DIR, str(note_id))
     versions = []
     if os.path.isdir(vdir):
@@ -202,8 +220,16 @@ def list_versions(note_id: int):
 
 
 @router.get("/notes/{note_id}/versions/{version}")
-def get_version(note_id: int, version: str):
+def get_version(note_id: int, version: str,
+                user: CurrentUser = Depends(current_user)):
     """FR-39 — read the content of a specific historical version."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        _assert_owned(cur, note_id, user["id"])
+    finally:
+        cur.close()
+        conn.close()
     vpath = os.path.join(VERSIONS_DIR, str(note_id), f"{version}.md")
     if not os.path.exists(vpath):
         raise HTTPException(404, "Version not found.")
@@ -213,15 +239,15 @@ def get_version(note_id: int, version: str):
 
 
 @router.delete("/notes/{note_id}")
-def delete_note(note_id: int):
+def delete_note(note_id: int, user: CurrentUser = Depends(current_user)):
     """FR-19 — soft delete: mark trashed, move file to trash, audit."""
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute(
             "UPDATE notes SET status = 'trashed', deleted_at = NOW() "
-            "WHERE id = %s AND status = 'active' RETURNING title",
-            (note_id,),
+            "WHERE id = %s AND users_id = %s AND status = 'active' RETURNING title",
+            (note_id, user["id"]),
         )
         row = cur.fetchone()
         if not row:
@@ -248,14 +274,12 @@ def delete_note(note_id: int):
 
 
 @router.post("/notes/{note_id}/schedule")
-def schedule_note(note_id: int):
+def schedule_note(note_id: int, user: CurrentUser = Depends(current_user)):
     """Q4 — convert note into task/event via LLM extraction (AI not yet wired)."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id FROM notes WHERE id = %s AND status = 'active'", (note_id,))
-        if not cur.fetchone():
-            raise HTTPException(404, "Note not found.")
+        _assert_owned(cur, note_id, user["id"])
     finally:
         cur.close()
         conn.close()

@@ -1,6 +1,7 @@
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from api.db import get_db
+from api.auth import require_admin, CurrentUser
 
 router = APIRouter(tags=["Audit"])
 
@@ -10,6 +11,7 @@ def get_audit_log(
     entity_type: Optional[str] = None,
     entity_id  : Optional[int] = None,
     limit      : int = 50,
+    admin: CurrentUser = Depends(require_admin),
 ):
     """FR-28 — read-only audit log."""
     conn = get_db()

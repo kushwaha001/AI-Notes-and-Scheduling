@@ -6,9 +6,10 @@ permanent-removal path. Covers events, tasks, documents (DB) and notes (files).
 
 import os
 import shutil
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from api.db import get_db
 from api.config import NOTES_DIR
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Trash"])
 
@@ -19,38 +20,39 @@ PURGE_DAYS = 30  # configurable retention before permanent removal
 
 
 @router.get("/trash")
-def list_trash():
+def list_trash(user: CurrentUser = Depends(current_user)):
     """Unified listing of everything currently in trash."""
     conn = get_db()
     cur = conn.cursor()
+    uid = user["id"]
     try:
         cur.execute("""
             SELECT id, title, event_date, deleted_at
-            FROM events WHERE status = 'trashed' AND deleted_at IS NOT NULL
+            FROM events WHERE status = 'trashed' AND deleted_at IS NOT NULL AND users_id = %s
             ORDER BY deleted_at DESC
-        """)
+        """, (uid,))
         events = cur.fetchall()
 
         cur.execute("""
             SELECT id, title, due_date, deleted_at
-            FROM tasks WHERE status = 'trashed' AND deleted_at IS NOT NULL
+            FROM tasks WHERE status = 'trashed' AND deleted_at IS NOT NULL AND users_id = %s
             ORDER BY deleted_at DESC
-        """)
+        """, (uid,))
         tasks = cur.fetchall()
 
         cur.execute("""
             SELECT id, filename, file_type, deleted_at
-            FROM documents WHERE status = 'trashed' AND deleted_at IS NOT NULL
+            FROM documents WHERE status = 'trashed' AND deleted_at IS NOT NULL AND users_id = %s
             ORDER BY deleted_at DESC
-        """)
+        """, (uid,))
         documents = cur.fetchall()
 
         # Notes — DB-backed metadata, body in NOTES_DIR/.trash
         cur.execute("""
             SELECT id, title, classification, deleted_at
-            FROM notes WHERE status = 'trashed' AND deleted_at IS NOT NULL
+            FROM notes WHERE status = 'trashed' AND deleted_at IS NOT NULL AND users_id = %s
             ORDER BY deleted_at DESC
-        """)
+        """, (uid,))
         notes = cur.fetchall()
 
         return {
@@ -66,18 +68,20 @@ def list_trash():
 
 
 @router.post("/trash/{entity_type}/{entity_id}/restore")
-def restore_item(entity_type: str, entity_id: str):
+def restore_item(entity_type: str, entity_id: str,
+                 user: CurrentUser = Depends(current_user)):
     """FR-19 — restore an item from trash to its active state."""
     conn = get_db()
     cur = conn.cursor()
+    uid = user["id"]
     try:
         eid = int(entity_id)
 
         if entity_type == "note":
             cur.execute(
                 "UPDATE notes SET status = 'active', deleted_at = NULL "
-                "WHERE id = %s AND status = 'trashed' RETURNING id",
-                (eid,),
+                "WHERE id = %s AND status = 'trashed' AND users_id = %s RETURNING id",
+                (eid, uid),
             )
             if not cur.fetchone():
                 raise HTTPException(404, "Trashed note not found.")
@@ -103,8 +107,8 @@ def restore_item(entity_type: str, entity_id: str):
 
         cur.execute(
             f"UPDATE {table} SET status = %s, deleted_at = NULL "
-            f"WHERE id = %s AND status = 'trashed' RETURNING id",
-            (active_status, eid),
+            f"WHERE id = %s AND status = 'trashed' AND users_id = %s RETURNING id",
+            (active_status, eid, uid),
         )
         if not cur.fetchone():
             raise HTTPException(404, f"Trashed {entity_type} not found.")
@@ -126,14 +130,21 @@ def restore_item(entity_type: str, entity_id: str):
 
 
 @router.delete("/trash/{entity_type}/{entity_id}")
-def purge_item(entity_type: str, entity_id: str):
+def purge_item(entity_type: str, entity_id: str,
+               user: CurrentUser = Depends(current_user)):
     """Permanent removal from trash (the only hard-delete path)."""
     conn = get_db()
     cur = conn.cursor()
+    uid = user["id"]
     try:
         eid = int(entity_id)
 
         if entity_type == "note":
+            # Verify ownership before touching files or the DB row.
+            cur.execute("SELECT 1 FROM notes WHERE id = %s AND users_id = %s AND status = 'trashed'",
+                        (eid, uid))
+            if cur.fetchone() is None:
+                raise HTTPException(404, "Trashed note not found.")
             # remove trashed body + version snapshots, then the DB row
             for p in (
                 os.path.join(TRASH_DIR, f"{eid}.md"),
@@ -144,7 +155,8 @@ def purge_item(entity_type: str, entity_id: str):
             vdir = os.path.join(NOTES_DIR, ".versions", str(eid))
             if os.path.isdir(vdir):
                 shutil.rmtree(vdir, ignore_errors=True)
-            cur.execute("DELETE FROM notes WHERE id = %s AND status = 'trashed'", (eid,))
+            cur.execute("DELETE FROM notes WHERE id = %s AND users_id = %s AND status = 'trashed'",
+                        (eid, uid))
             cur.execute("""
                 INSERT INTO audit_log (action, entity_type, entity_id, detail)
                 VALUES ('purged', 'note', %s, 'Permanently removed from trash')
@@ -155,7 +167,8 @@ def purge_item(entity_type: str, entity_id: str):
         table = {"event": "events", "task": "tasks", "document": "documents"}.get(entity_type)
         if not table:
             raise HTTPException(400, f"Unknown entity type '{entity_type}'.")
-        cur.execute(f"DELETE FROM {table} WHERE id = %s AND status = 'trashed'", (eid,))
+        cur.execute(f"DELETE FROM {table} WHERE id = %s AND users_id = %s AND status = 'trashed'",
+                    (eid, uid))
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('purged', %s, %s, 'Permanently removed from trash')
@@ -173,7 +186,7 @@ def purge_item(entity_type: str, entity_id: str):
 
 
 @router.post("/trash/purge-expired")
-def purge_expired():
+def purge_expired(user: CurrentUser = Depends(current_user)):
     """FR-19 — purge items trashed longer than the retention window."""
     conn = get_db()
     cur = conn.cursor()
@@ -184,7 +197,9 @@ def purge_expired():
                 f"DELETE FROM {table} "
                 f"WHERE status = 'trashed' "
                 f"  AND deleted_at < NOW() - INTERVAL '{PURGE_DAYS} days' "
+                f"  AND users_id = %s "
                 f"RETURNING id",
+                (user["id"],),
             )
             purged[entity_type] = len(cur.fetchall())
         conn.commit()
