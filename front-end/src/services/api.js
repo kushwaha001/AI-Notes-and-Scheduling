@@ -68,9 +68,31 @@ export const uploadFile = (file) => {
 };
 
 export const deleteDocument = (id) => req("DELETE", `/documents/${id}`);
+export const reextractDocument = (id) => req("POST", `/documents/${id}/reextract`);
 
 // FR-27 — open the original document (returns a URL for <a>/<img>)
 export const documentDownloadUrl = (id) => `${BASE}/documents/${id}/download`;
+
+// FR-39 — backups
+export const createBackup  = () => req("POST", "/backup");
+export const getLastBackup = () => req("GET", "/backup/last");
+
+// FR-41 — system status (model loaded, GPU/disk, queue depth, last backup)
+export const getSystemStatus = () => req("GET", "/system/status");
+
+// FR-37 — reminders → browser notifications
+export const getDueReminders   = (windowMin = 1) =>
+  req("GET", `/reminders/due?window_min=${windowMin}`).then((r) => r.due || []);
+export const markReminderDelivered = (id) =>
+  req("POST", `/reminders/${id}/delivered`);
+
+// FR-25 — AI-suggested soft links
+export const getLinkSuggestions = (kind, id, topK = 5) =>
+  req("GET", `/links/suggestions/${kind}/${id}?top_k=${topK}`).then((r) => r.suggestions || []);
+export const getAcceptedLinks = (kind, id) =>
+  req("GET", `/links/${kind}/${id}`).then((r) => r.linked || []);
+export const acceptLink = (pair) => req("POST", "/links/accept", pair);
+export const rejectLink = (pair) => req("POST", "/links/reject", pair);
 
 // ── Queue ─────────────────────────────────────────────────────
 export const getQueue = () => req("GET", "/queue").then((r) => r.jobs || []);
@@ -82,12 +104,28 @@ export const cancelJob = (id) => req("DELETE", `/queue/${id}`);
 export const getPendingConfirmations = () =>
   req("GET", "/confirmations/pending").then((r) => r.pending || []);
 
+export const getConfirmation = (jobId) => req("GET", `/confirmations/${jobId}`);
+
 export const confirmItem = (data) => req("POST", "/confirmations/confirm", data);
 export const dismissItem = (data) => req("POST", "/confirmations/dismiss", data);
+
+export const processQueue = () => req("POST", "/queue/process");
 
 // ── Search ────────────────────────────────────────────────────
 export const search = (q, params = {}) =>
   req("POST", "/search", { q, top_k: 10, ...params });
+
+// ── Ask (RAG over documents + notes) ──────────────────────────
+export const ask     = (q, top_k = 5) => req("POST", "/ask", { q, top_k });
+export const reindex = () => req("POST", "/ask/reindex");
+
+// ── Voice (FR-6) ──────────────────────────────────────────────
+export const uploadVoice = (file) => {
+  const fd = new FormData();
+  fd.append("file", file, file.name || "voice.webm");
+  return req("POST", "/upload/voice", fd);
+};
+export const voiceExtract = (transcript) => req("POST", "/voice/extract", { transcript });
 
 // ── Notes ─────────────────────────────────────────────────────
 export const getNotes      = () => req("GET", "/notes").then((r) => r.notes || []);

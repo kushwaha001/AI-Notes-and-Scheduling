@@ -1,276 +1,420 @@
-# Offline / Air-Gapped Deployment — Complete Step-by-Step Guide
+# Offline / Air-Gapped Deployment Guide
 
-How to run **AI Notes & Scheduling** on a PC that has **no internet**, by
-preparing everything on an internet-connected PC and transferring it via USB.
+How to run **AI Notes & Scheduling** on a Dev-Lan PC that has **no internet**.
+Everything is downloaded on an internet PC, copied across (USB), and installed
+from the copied files. You start the backend and frontend with **plain commands**
+— no helper scripts.
 
-> **The whole idea:** the offline PC cannot download anything (`pip install` /
-> `npm install` will fail). So we download every dependency on an internet PC,
-> copy it across, and install from the copied files.
-
-**The offline PC needs only two things installed: Python 3.11 and PostgreSQL.**
-It does **NOT** need Node.js or Docker — the React UI is pre-built on the internet
-PC and served by Python's own standard library.
-
----
-
-## Table of contents
-1. [What you are moving](#0-what-you-are-moving)
-2. [Part A — On the INTERNET PC](#part-a--on-the-internet-pc-gather-everything)
-3. [Part B — Transfer to USB](#part-b--transfer)
-4. [Part C — On the OFFLINE PC](#part-c--on-the-offline-pc-install--run)
-5. [The fast path (helper scripts)](#the-fast-path-using-the-helper-scripts)
-6. [Verify it works](#verify-it-works)
-7. [Docker alternative (Linux only)](#docker-alternative-linux-targets-only)
-8. [What travels and what doesn't](#what-travels-and-what-doesnt)
-9. [Troubleshooting](#troubleshooting)
-10. [One-breath summary](#one-breath-summary)
+> **The whole idea:** the offline PC cannot download anything (`pip install`,
+> `npm install`, and `ollama pull` all need internet). So we fetch every
+> dependency **and every AI model** on an internet PC, copy them over, and load
+> them locally.
 
 ---
 
-## 0. What you are moving
+## What runs where
 
-| Piece | Needs internet on offline PC? | How it's handled |
-|-------|------------------------------|------------------|
-| PostgreSQL (database) | No | Installed from a copied installer |
-| Python backend (FastAPI) | No | Installed from copied `.whl` files |
-| React frontend | No | Pre-built on internet PC, served by Python |
+| Component | Where it runs | How it gets there offline |
+|-----------|---------------|---------------------------|
+| PostgreSQL (database) | App PC | Copied installer |
+| Backend (FastAPI) | App PC | Python wheels (copied) |
+| Frontend (React/Vite) | App PC | `node_modules` (copied) |
+| **Ollama** (LLM + embeddings) | Office server | Install Ollama + copy the model blobs |
+| **Qdrant** (vector index) | App PC (embedded) | Bundled with the Python wheels — no server needed |
+| Docling / Whisper models | App PC | Copy the model caches |
 
-Helper files in the `offline/` folder that you'll use:
-- `1-fetch-on-internet-pc.bat` — automates downloading wheels + building the UI
-- `2-install-on-offline-pc.bat` — automates creating the venv + installing wheels
-- `3-run.bat` — starts the backend and the frontend together
-- `serve_frontend.py` — the Node-free static server for the built UI
-- `wheels/` — (you create this) the downloaded backend packages
-- `installers/` — (you create this) the Python + PostgreSQL installers
+The app talks to Ollama over HTTP (`OLLAMA_HOST`), so Ollama can live on the
+office server while the app runs on the same PC or another box on the Dev Lan.
 
 ---
 
-## PART A — On the INTERNET PC (gather everything)
+## ✅ What this bundle already contains
 
-Use a **Windows x64** PC with internet and the repo cloned. Best results if it
-has the **same Python version (3.11)** as the offline PC will have.
+This repo has been **pre-staged** — you don't need to download anything on an
+internet PC. Just zip the project folder (with `offline\`) and carry it across.
 
-### A1. Download the backend Python packages (wheels)
-From the project root:
-```powershell
-cd backend
-python -m pip download -r requirements.txt -d ..\offline\wheels
-python -m pip download pip setuptools wheel -d ..\offline\wheels
-cd ..
-```
-Result: `offline\wheels\` fills with `.whl` files (≈ 50–100 MB).
+| In `offline\` | What it is | Goes to |
+|---------------|------------|---------|
+| `wheels-bundle\` | All Python wheels — exact locked set (Win x64 / Py 3.11), **incl. GPU `torch` (cu128) for OCR + CUDA cuBLAS/cuDNN for voice** (~4.2 GB) | `pip install` on the App PC |
+| `models\ollama-models\` | `gemma3:4b` + `bge-m3` (+ nomic) blobs | the office server's `.ollama\models` |
+| `models\huggingface-cache\` | Whisper `distil-large-v3` (+ `base` fallback) + Docling layout models | App PC `%USERPROFILE%\.cache\huggingface` |
+| `models\EasyOCR\` | OCR models | App PC `%USERPROFILE%\.EasyOCR` |
 
-> **If the offline PC has a different Python version**, force the target:
-> ```powershell
-> python -m pip download -r backend\requirements.txt -d offline\wheels ^
->   --only-binary=:all: --platform win_amd64 --python-version 311 ^
->   --implementation cp --abi cp311
-> ```
+You still install **Python 3.11**, **PostgreSQL**, and **Ollama** from
+`offline\installers\` (add those installers before sending). Part A below is only
+needed if you ever want to **rebuild/refresh** the bundle.
 
-### A2. Build the frontend (React → plain static files)
-```powershell
-cd front-end
-npm install
-$env:VITE_API_BASE = "http://localhost:9000"
-npm run build
-$env:VITE_API_BASE = ""
-cd ..
-```
-- `npm run build` creates `front-end\dist\` — plain HTML/CSS/JS, no Node needed.
-- Setting `VITE_API_BASE` makes the built UI call the backend directly on port
-  9000 (the offline server has no proxy).
+> **No wheel changes for the latest features.** Reminders/browser notifications
+> (FR-37), AI-suggested soft links (FR-25), the auto-backup (FR-39) and the
+> richer status page (FR-41 — model state, GPU, disk, queue depth) were all built
+> on the **standard library + packages already in the bundle**. Nothing new to
+> download; the existing `wheels-bundle\` is complete.
+>
+> - The status page reads GPU usage via **`nvidia-smi`**, which ships with the
+>   NVIDIA driver — no Python package. On a box with no GPU it simply shows
+>   "inference runs on the Ollama server" instead of failing.
+> - The new `soft_links` table is created automatically on first startup
+>   (idempotent schema) — no manual migration.
+> - Browser notifications need no install; the browser prompts for permission
+>   on first load, and the dashboard remains the reliable fallback.
 
-### A3. Download the installers for the offline PC
-Create `offline\installers\` and download these two into it:
-- **Python 3.11 (Windows x64)** — https://www.python.org/downloads/
-- **PostgreSQL (Windows x64)** — https://www.postgresql.org/download/windows/
+> **Voice (FR-6) now runs on the GPU.** The STT model is **`distil-large-v3`**
+> (English, near large-v3 accuracy, ~10x realtime on GPU once warm) instead of
+> the old `base`. This added four **CUDA runtime wheels** to the bundle
+> (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `nvidia-cuda-runtime-cu12`,
+> `nvidia-cuda-nvrtc-cu12`, ~1.3 GB total), **pinned to the CUDA 12.8 series** to
+> match the office GPU — already included in `wheels-bundle\`. These wheels are
+> self-contained (they ship the actual CUDA DLLs), so **no CUDA toolkit install is
+> needed** — only the **NVIDIA driver** (any that supports CUDA 12.x).
+> `transcribe.py` auto-registers those DLLs at startup.
+> On a box with **no GPU**, set `WHISPER_DEVICE=cpu` and `WHISPER_COMPUTE_TYPE=int8`
+> in `.env` — it falls back automatically and still works (just slower).
 
-### A4. (Optional) Cloudflare tunnel binary
-Only if you'll later share the offline PC's app over a LAN — copy `cloudflared.exe`
-into the project root too.
-
-### A5. Confirm the bundle contents
-Before copying, the project folder must contain:
-- ✅ `offline\wheels\` (from A1)
-- ✅ `front-end\dist\` (from A2)
-- ✅ `offline\installers\` with both installers (from A3)
-- ✅ all the source code (the rest of the repo)
-
-> You do **not** copy `venv\` or `node_modules\` — those get rebuilt on the
-> offline PC.
+> **Document extraction (FR-8) also runs OCR on the GPU now.** `torch` is the
+> CUDA 12.8 build (`+cu128`), so Docling's EasyOCR + layout models use the GPU —
+> a multi-page scanned letter parses in seconds instead of minutes. The parser
+> auto-detects CUDA (`AcceleratorDevice.AUTO`) and falls back to CPU if there's no
+> GPU, so nothing breaks on a CPU-only box.
 
 ---
 
-## PART B — Transfer
+## Start commands (normal — no scripts)
 
-Copy the **entire project folder** onto a USB drive, then onto the offline PC,
-e.g. to `C:\AI-Notes-and-Scheduling`.
+Two terminals, every time you run the app:
 
----
-
-## PART C — On the OFFLINE PC (install & run)
-
-### C1. Install the prerequisites (from `offline\installers\`)
-1. Run the **Python 3.11** installer — **tick “Add python.exe to PATH”**.
-2. Run the **PostgreSQL** installer — **write down the password** you set for the
-   `postgres` user; you'll need it in C3. Keep the default port `5432`.
-
-Verify Python is on PATH (open a **new** terminal):
 ```powershell
-python --version        # should print Python 3.11.x
-```
-
-### C2. Install the backend from the copied wheels (no internet)
-From the project root:
-```powershell
-cd backend
-python -m venv venv
-.\venv\Scripts\activate
-python -m pip install --no-index --find-links ..\offline\wheels -r requirements.txt
-cd ..
-```
-- `--no-index` = **never go to the internet**.
-- `--find-links ..\offline\wheels` = install from the copied files.
-
-### C3. Create the `.env` file with your database password
-```powershell
-copy backend\.env.example backend\.env
-```
-Open `backend\.env` in Notepad and set:
-```
-DB_PASSWORD=the-password-you-set-in-C1
-```
-Leave `DB_HOST=localhost`, `DB_PORT=5432`, `DB_NAME=udaan_db`, `DB_USER=postgres`
-unless your PostgreSQL install differs.
-
-### C4. Make sure PostgreSQL is running
-Open **Services** (Win+R → `services.msc`) and confirm `postgresql-x64-…` is
-**Running** (or open pgAdmin). You do **not** create the database or tables by
-hand — the backend does it automatically on first start.
-
-### C5. Start the app
-```powershell
-offline\3-run.bat
-```
-This opens two windows:
-- **Backend** → http://localhost:9000 (creates `udaan_db` + all tables on first run)
-- **Frontend** → http://localhost:5173 (served by Python)
-
-Or start them manually in two terminals:
-```powershell
-# Terminal 1 — backend
+# Terminal 1 — backend  (creates the DB + tables automatically on first run)
 cd backend
 .\venv\Scripts\activate
 uvicorn api.main:app --host 0.0.0.0 --port 9000
 
-# Terminal 2 — frontend (system Python, stdlib only)
-python offline\serve_frontend.py
+# Terminal 2 — frontend  (Vite proxies /api -> localhost:9000 automatically)
+cd front-end
+npm run dev
 ```
 
-### C6. Open the app
-Browse to **http://localhost:5173**. Fully offline. 🎉
+Open **http://localhost:5173**.
 
 ---
 
-## The fast path (using the helper scripts)
+# PART A — On the INTERNET PC (gather everything)
 
-If you'd rather not type the commands:
+Use a **Windows x64** PC with internet, **Python 3.11**, and the repo cloned —
+matching the App PC so the wheels are compatible.
 
-**On the internet PC:**
+### A1. Backend Python wheels → `wheels-bundle\`
+The **exact** working package set is captured in `backend\requirements-lock.txt`
+(generated with `pip freeze`). Because every version is pinned, the download is a
+single fast, low-memory pass:
 ```powershell
-offline\1-fetch-on-internet-pc.bat     # does A1 + A2 automatically
+cd backend
+# torch/torchvision are GPU builds (+cu128), which live on the PyTorch index —
+# add it as an extra index so the one pass finds everything.
+python -m pip download -r requirements-lock.txt pip setuptools wheel `
+  --extra-index-url https://download.pytorch.org/whl/cu128 `
+  -d ..\offline\wheels-bundle
+cd ..
 ```
-Then do A3 (download the two installers into `offline\installers\`) and copy the
-folder to USB.
+> **GPU build (~4.2 GB total).** `torch==2.11.0+cu128` / `torchvision==0.26.0+cu128`
+> (~2.6 GB) run **document OCR + layout on the GPU**, and the four `nvidia-*-cu12`
+> wheels (CUDA 12.8, ~1.3 GB) let **CTranslate2 run Whisper on the GPU**. All are
+> pinned in `requirements-lock.txt`; the `--extra-index-url` above is what makes
+> the `+cu128` wheels resolvable. The cu128 torch wheel is self-contained (bundles
+> its own CUDA libs).
+>
+> *CPU-only target?* Replace torch with the CPU build instead:
+> `pip download torch==2.12.1 torchvision==0.27.1 -d ..\offline\wheels-bundle`
+> (and drop the `+cu128` lines from the lock). The app auto-detects and falls back
+> to CPU either way — it just runs OCR slower.
 
-**On the offline PC:**
+### A2. Frontend dependencies
 ```powershell
-offline\2-install-on-offline-pc.bat    # does C2 (venv + wheels)
-# then set DB_PASSWORD in backend\.env  (C3)
-offline\3-run.bat                      # starts backend + frontend (C5)
+cd front-end
+npm install        # creates node_modules/ — this is what you copy
+cd ..
 ```
+You copy the whole `front-end/node_modules/` folder; the offline PC never runs
+`npm install`.
+
+### A3. The AI MODELS → `offline\models\`
+These normally download on first use, so pre-fetch them into `offline\models\`.
+
+**1) Ollama models (LLM + embeddings):**
+```powershell
+ollama pull gemma3:4b
+ollama pull bge-m3
+robocopy "$env:USERPROFILE\.ollama\models" offline\models\ollama-models /E
+```
+
+**2) Whisper + Docling caches** — trigger each once, then copy the caches:
+```powershell
+cd backend; .\venv\Scripts\activate
+python -c "from faster_whisper import WhisperModel; WhisperModel('distil-large-v3')"
+python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
+cd ..
+robocopy "$env:USERPROFILE\.cache\huggingface" offline\models\huggingface-cache /E
+robocopy "$env:USERPROFILE\.EasyOCR"           offline\models\EasyOCR /E
+```
+> Docling stores its layout models inside the HuggingFace cache, so
+> `huggingface-cache` covers **both** Whisper and Docling.
+
+### A4. Installers for the App PC
+Download into `offline\installers\`:
+- **Python 3.11 (Windows x64)** — https://www.python.org/downloads/
+- **PostgreSQL (Windows x64)** — https://www.postgresql.org/download/windows/
+- **Ollama (for the office server)** — https://ollama.com/download
+
+### A5. Confirm the bundle
+Before zipping, `offline\` must contain:
+- ✅ `wheels-bundle\` (A1) · `models\ollama-models\`, `models\huggingface-cache\`,
+  `models\EasyOCR\` (A3) · `installers\` (A4)
+- ✅ `front-end\node_modules\` (A2) and the source code
+
+You do **not** copy `backend\venv\` — it's rebuilt offline.
 
 ---
 
-## Verify it works
+# PART B — Transfer
 
-On the offline PC, after C5:
-```powershell
-# backend alive?
-curl http://localhost:9000/health        # -> {"status":"ok","version":"1.0.0"}
-```
-The backend window should log:
-```
-Database 'udaan_db' created.       (first run only)
-Schema applied successfully.
-Database ready.
-Application startup complete.
-```
-Then the browser at http://localhost:5173 should load with no red “Backend
-offline” banner.
+Zip the **entire project folder** (with `offline\`) and copy it to the office
+network, e.g. `C:\AI-Notes-and-Scheduling`. Carry `offline\models\ollama-models\`
+to the **office server** (where Ollama runs).
 
 ---
 
-## Docker alternative (Linux targets only)
+# PART C — On the OFFLINE PC / OFFICE SERVER (install & run)
 
-**On Windows offline PCs, skip Docker** — it needs WSL2, which is a heavy offline
-install. Use the native steps above.
+### C1. Install prerequisites (from `offline\installers\`)
+1. **Python 3.11** — tick **“Add python.exe to PATH”**.
+2. **PostgreSQL** — note the `postgres` password, keep port `5432`.
 
-**If the offline target is a Linux server that already has Docker**, you can ship
-containers instead:
-```bash
-# On the internet PC (has Docker):
-docker compose build
-docker save -o ai-notes-images.tar \
-  ai-notes-and-scheduling-backend ai-notes-and-scheduling-frontend postgres:16
-
-# Copy ai-notes-images.tar + docker-compose.yml to the offline server, then:
-docker load -i ai-notes-images.tar
-docker compose up -d
+### C2. Backend — install everything from the bundled wheels (no internet)
+The bundle ships a single complete wheel folder, `offline\wheels-bundle\`
+(**Windows x64 / Python 3.11**), matching `requirements-lock.txt` exactly.
+Install the whole locked set in one go:
+```powershell
+cd backend
+python -m venv venv
+.\venv\Scripts\activate
+python -m pip install --no-index --find-links ..\offline\wheels-bundle -r requirements-lock.txt
+cd ..
 ```
-This bundles PostgreSQL, backend and frontend as images — the target needs only
-Docker (no Python, Node, or wheels). Files used: `docker-compose.yml`,
-`backend/Dockerfile`, `front-end/Dockerfile`.
+- `--no-index` = never touch the internet; everything comes from the bundle.
+> If the office server is **Linux**, these Windows wheels won't fit — re-run A1
+> on a Linux box to regenerate `wheels-bundle` for that platform.
+
+### C4. Frontend — drop in the copied `node_modules`
+Place the copied `front-end\node_modules\` folder in `front-end\`. No install
+needed; `npm run dev` will just work.
+
+### C5. Set up Ollama on the office server
+1. Install Ollama (from `offline\installers\`).
+2. Copy the bundled model blobs **`offline\models\ollama-models\*`** into the
+   server's Ollama models directory:
+   - Windows: `C:\Users\<you>\.ollama\models`
+   - Linux/macOS: `~/.ollama/models`
+   (Ollama blobs are plain files — they transfer across OSes fine.)
+3. Start Ollama and verify:
+   ```powershell
+   ollama serve          # if not already running as a service
+   ollama list           # must show gemma3:4b and bge-m3
+   ```
+
+### C6. Place the Whisper + Docling + OCR model caches (on the App PC)
+Copy the bundled caches into the App PC's user profile:
+- `offline\models\huggingface-cache`  →  `%USERPROFILE%\.cache\huggingface`
+  *(contains both the Whisper model and the Docling layout models)*
+- `offline\models\EasyOCR`            →  `%USERPROFILE%\.EasyOCR`
+
+### C7. Qdrant (vector search)
+**Nothing to install** — the app uses Qdrant in **embedded mode** and stores the
+index on disk at `backend\qdrant_data\`. It's built from the `qdrant-client`
+wheel (already installed in C3) and rebuilds from your documents/notes via the
+**“Rebuild index”** button on the Ask page.
+
+> *Optional — a standalone Qdrant server:* if you prefer running Qdrant as a
+> service on the office server, install it there and set `QDRANT_HOST` in `.env`;
+> note the current code defaults to the embedded store, so the server path is an
+> opt-in change in `backend/api/ai/vectorstore.py`.
+
+### C8. Configure `backend\.env`
+```powershell
+copy backend\.env.example backend\.env
+```
+Edit it:
+```ini
+# Database
+DB_PASSWORD=the-postgres-password-from-C1
+
+# Ollama on the office server (use its hostname/IP if remote)
+OLLAMA_HOST=http://OFFICE-SERVER:11434
+OLLAMA_MODEL=gemma3:4b
+EMBED_MODEL=bge-m3
+OLLAMA_KEEP_ALIVE=30m
+
+# Voice (faster-whisper). GPU default — needs only the NVIDIA driver; the CUDA
+# DLLs ship as wheels and auto-load. No GPU? set device=cpu, compute_type=int8.
+WHISPER_MODEL=distil-large-v3
+WHISPER_DEVICE=cuda
+WHISPER_COMPUTE_TYPE=float16
+WHISPER_LANGUAGE=en
+```
+If the frontend and backend run on the **same** PC, the Vite proxy needs the
+backend on `localhost:9000` — keep that. `OLLAMA_HOST` can point anywhere on the
+Dev Lan.
+
+### C9. Start it (normal commands)
+Make sure PostgreSQL is running (Services → `postgresql-x64-…`), then use the two
+**Start commands** at the top of this guide. The backend creates `udaan_db` and
+all tables on first run.
+
+---
+
+## Verify
+
+```powershell
+curl http://localhost:9000/health      # {"status":"ok"}
+curl http://localhost:9000/services    # ollama:ok, docling:ok, ai_extraction:ready
+```
+Then open **http://localhost:5173** — no red “Backend offline” banner.
+
+If `ai_extraction` is `offline`, check `OLLAMA_HOST` is reachable from the App PC
+and `ollama list` shows both models on the server.
+
+---
+
+## The four AI model assets (quick reference)
+
+| Asset | Bundled in | Goes to | Size |
+|-------|-----------|---------|------|
+| `gemma3:4b` (LLM) | `models\ollama-models` | server `.ollama\models` | ~3.3 GB |
+| `bge-m3` (embeddings) | `models\ollama-models` | server `.ollama\models` | ~1.2 GB |
+| Whisper `distil-large-v3` (voice) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~1.45 GB |
+| Whisper `base` (voice, CPU fallback) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~0.15 GB |
+| Docling layout (OCR) | `models\huggingface-cache` | App PC `.cache\huggingface` | ~0.45 GB |
+| EasyOCR models | `models\EasyOCR` | App PC `.EasyOCR` | ~0.11 GB |
+
+---
+
+## Degraded mode (NFR-9)
+
+If Ollama is unreachable, the app **still runs**: manual entry, calendar, tasks,
+notes, keyword search, and viewing all work. Uploads are accepted and **queued**;
+when Ollama returns, drain the backlog with `POST /queue/process` (or the
+**“Run AI on queued”** button on Upload). The Status page shows the live state.
 
 ---
 
 ## What travels and what doesn't
 
-| Item | In the USB bundle? | Notes |
-|------|--------------------|-------|
+| Item | In the bundle? | Notes |
+|------|----------------|-------|
 | Source code | ✅ | the repo |
-| `offline/wheels/` | ✅ | backend dependencies (from A1) |
-| `front-end/dist/` | ✅ | pre-built UI (from A2) |
-| Python + PostgreSQL installers | ✅ | `offline/installers/` (from A3) |
-| `backend/.env` | ❌ create on offline PC | holds the DB password (C3) |
-| `venv/` | ❌ rebuilt on offline PC | created in C2 |
-| `node_modules/` | ❌ not needed offline | only used to build in A2 |
-| **Your data** | ❌ | offline PC starts with an empty, auto-created database |
+| Backend wheels (core+ai+gpu) | ✅ | `offline\wheels-bundle\` |
+| `front-end\node_modules\` | ✅ | so `npm run dev` works offline |
+| Ollama model blobs | ✅ | `offline\models\ollama-models\` → office server `.ollama\models` |
+| Whisper / Docling / EasyOCR caches | ✅ | `offline\models\` → user profile |
+| Installers (Python/PostgreSQL/Ollama) | ✅ | `offline\installers\` |
+| `backend\.env` | ❌ create offline | holds DB password + `OLLAMA_HOST` |
+| `backend\venv\` | ❌ rebuilt offline | created in C2 |
+| `backend\qdrant_data\` | ❌ built locally | “Rebuild index” regenerates it |
+| Your data | ❌ | offline PC starts with an empty, auto-created DB |
 
 ---
 
 ## Troubleshooting
 
-| Problem | Cause / Fix |
-|---------|-------------|
-| Red **“Backend offline”** banner | Backend not running, wrong `DB_PASSWORD` in `.env`, or you forgot `--port 9000`. |
-| `pip` tries to reach the internet | You missed `--no-index`. It must point only at `offline\wheels`. |
-| `pip` can't find a package | Wheels were downloaded for a different Python version — redo A1 with the explicit `--python-version 311` form. |
-| `python` not recognized | Python 3.11 wasn't added to PATH — reinstall and tick “Add python.exe to PATH”, then open a new terminal. |
-| PostgreSQL “connection refused” | The PostgreSQL service isn't running, or `DB_PORT`/`DB_USER` in `.env` don't match your install. |
-| Backend starts but “password authentication failed” | `DB_PASSWORD` in `.env` doesn't match the password you set during PostgreSQL install (C1). |
-| Frontend loads but shows no data | Backend isn't on port 9000, or A2 build didn't set `VITE_API_BASE=http://localhost:9000`. |
-| Port 9000 or 5173 already in use | Close the other process, or change the port (and `VITE_API_BASE` if you change 9000). |
+| Problem | Fix |
+|---------|-----|
+| Red “Backend offline” banner | Backend not running, wrong `DB_PASSWORD`, or not on `--port 9000`. |
+| `pip` tries the internet | You missed `--no-index`. Point it only at `offline\wheels-bundle`. |
+| `pip download` fails with `MemoryError` | Don't combine all requirements in one command — run the three passes separately (A1). |
+| `pip` can't find a package | Wheels are for a different Python/CUDA — re-download with the explicit `--python-version 311` form (A3). |
+| `ai_extraction: offline` | `OLLAMA_HOST` unreachable, or `ollama list` doesn't show the models on the server. |
+| Upload says “queued”, never extracts | AI was offline at upload — call `POST /queue/process` once Ollama is up. |
+| Voice: `cublas64_12.dll not found` | The CUDA toolkit DLLs aren't present — set `WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`. |
+| Docling OCR error about `rapidocr`/`PP-OCRv6` | Ensure `easyocr` is installed; the parser uses EasyOCR on purpose. |
+| Dates look wrong | Always verify on the confirm screen — that step exists precisely because models misread dates (NFR-4). |
 
 ---
 
 ## One-breath summary
 
-**Internet PC:** download wheels (`offline\1-fetch-on-internet-pc.bat`), build the
-UI, drop the Python + PostgreSQL installers into `offline\installers\`, copy the
-whole folder to USB.
-**Offline PC:** install Python & PostgreSQL, create a `venv` and
-`pip install --no-index` from the copied wheels (`offline\2-install-on-offline-pc.bat`),
-set `DB_PASSWORD` in `backend\.env`, run `offline\3-run.bat`, open
-`http://localhost:5173`.
-**No internet, no Node, no Docker required.**
+**Internet PC:** download wheels (core + ai + gpu), `npm install` for
+`node_modules`, `ollama pull gemma3:4b` and `bge-m3` then copy
+`.ollama/models`, trigger Whisper/Docling once and copy their caches, grab the
+installers — copy it all to USB.
+**Offline PC:** install Python + PostgreSQL, `pip install --no-index` the wheels,
+drop in `node_modules` and the model caches, set up Ollama on the office server
+with the copied models, set `DB_PASSWORD` + `OLLAMA_HOST` in `backend\.env`, then
+run the two **Start commands**. Qdrant is embedded — nothing to install.
+**No internet needed anywhere.**
+
+---
+
+# Changing the models on the offline PC
+
+Every model is **config, not code** (NFR-7) — you swap it by editing
+`backend\.env` and restarting the backend. No source changes.
+
+> **Offline rule:** the offline PC can't `ollama pull` or download from
+> HuggingFace. So for **any** new model, first get it on an internet PC, then
+> copy it across (same as Part A4), before setting it in `.env`.
+
+### 1) Document/extraction + RAG model — `OLLAMA_MODEL`
+1. On an internet PC: `ollama pull <model>` → copy `.ollama/models` to the server.
+2. On the server: confirm with `ollama list`.
+3. In `backend\.env`: `OLLAMA_MODEL=<model>` → restart the backend.
+
+| Option | Size (approx) | When to use |
+|--------|---------------|-------------|
+| `gemma3:4b` *(default)* | ~3.3 GB | 4 GB GPU dev box — multimodal, good balance |
+| `qwen2.5:7b-instruct` | ~4.7 GB | Office GPU server — stronger text extraction |
+| `qwen2.5vl:7b` | ~6 GB | Best for **scanned/handwritten** letters (true vision model) |
+| `llama3.1:8b` | ~4.9 GB | Alternative general model |
+
+### 2) Embedding model (semantic search / Ask) — `EMBED_MODEL`
+1. Pull + copy the model to the server (as above).
+2. In `backend\.env`: `EMBED_MODEL=<model>`.
+3. **Rebuild the index** — the vector dimension differs per model. Either click
+   **“Rebuild index”** on the Ask page, or delete `backend\qdrant_data\` and let
+   it rebuild. (The app also auto-recreates the index if it detects a dimension
+   change, so a swap never crashes.)
+
+| Option | Dim | When to use |
+|--------|-----|-------------|
+| `bge-m3` *(default)* | 1024 | Best retrieval, multilingual, long context |
+| `bge-large` | 1024 | Strong English-only, a bit lighter |
+| `nomic-embed-text` | 768 | Lightest/fastest, lower accuracy |
+| `mxbai-embed-large` | 1024 | Strong English alternative |
+
+### 3) Voice model — `WHISPER_MODEL` / `WHISPER_DEVICE` / `WHISPER_COMPUTE_TYPE`
+Whisper models come from HuggingFace — pre-copy the cache (Part A4) before
+selecting a bigger one. **Default is `distil-large-v3` on `cuda/float16`**
+(English; bundled). GPU needs only the NVIDIA driver — the CUDA cuBLAS/cuDNN
+DLLs ship as pip wheels and are auto-loaded by `transcribe.py`.
+
+| Setting | No-GPU box | GPU box *(default)* | Multilingual |
+|---------|-----------|---------------------|--------------|
+| `WHISPER_MODEL` | `distil-large-v3` (slow) or `base` | `distil-large-v3` | `large-v3-turbo` |
+| `WHISPER_DEVICE` | `cpu` | `cuda` | `cuda` |
+| `WHISPER_COMPUTE_TYPE` | `int8` | `float16` | `float16` |
+| `WHISPER_LANGUAGE` | `en` | `en` | `` *(empty = auto-detect)* |
+
+> `distil-large-v3` is English-only. For Hindi/mixed audio switch to a
+> multilingual model (e.g. `large-v3-turbo`) and clear `WHISPER_LANGUAGE` —
+> pre-copy that model's HF cache first.
+
+### 4) Document OCR (Docling / EasyOCR)
+OCR is fixed (EasyOCR engine). To add a language, pre-copy that EasyOCR language
+pack into `.EasyOCR` on an internet PC first; it can't download offline.
+
+### After any swap
+```powershell
+# restart the backend so .env is re-read
+cd backend; .\venv\Scripts\activate; uvicorn api.main:app --host 0.0.0.0 --port 9000
+# embeddings changed? rebuild the index (Ask page button) or:
+#   Remove-Item backend\qdrant_data -Recurse -Force   then click "Rebuild index"
+```
+Verify on the Status page: model loaded, and `curl http://localhost:9000/services`
+shows `ai_extraction: ready`.

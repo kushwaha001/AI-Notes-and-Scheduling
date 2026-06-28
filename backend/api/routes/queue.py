@@ -1,8 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Optional
 from api.db import get_db
 
 router = APIRouter(tags=["Queue"])
+
+
+@router.post("/queue/process")
+def process_queue(background_tasks: BackgroundTasks):
+    """FR-8/NFR-9 — process any waiting documents now (e.g. once AI is back up)."""
+    from api.ai.pipeline import ai_ready, process_waiting
+    if not ai_ready():
+        raise HTTPException(503, "AI is not available (Ollama or Docling offline).")
+    background_tasks.add_task(process_waiting, 20)
+    return {"status": "processing", "message": "Processing queued documents in the background."}
 
 
 @router.get("/queue")

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from api.models import ManualEvent, EventUpdate
 >>>>>>> 162d4fa688f7facfdeedcef9f7f595a90b1d5e55
 from api.db import get_db
+from api.routes.reminders import insert_reminders
 
 router = APIRouter(tags=["Events"])
 
@@ -311,6 +312,8 @@ def create_event_manual(event: ManualEvent):
             eid = cur.fetchone()["id"]
             if first_id is None:
                 first_id = eid
+            # FR-17/FR-37 — reminders for each occurrence
+            insert_reminders(cur, eid, event.reminders)
 
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)

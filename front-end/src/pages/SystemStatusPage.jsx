@@ -1,6 +1,28 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { checkServices, getQueue, getAuditLog } from "../services/api";
+import { checkServices, getQueue, getAuditLog, createBackup, getLastBackup, getSystemStatus } from "../services/api";
+
+function Meter({ label, pct, detail }) {
+  const p = Math.max(0, Math.min(100, pct ?? 0));
+  const color = p > 85 ? "#dc2626" : p > 60 ? "#c2410c" : "#16a34a";
+  return (
+    <div style={{ background: "white", borderRadius: "14px", padding: "16px", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+        <span style={{ fontWeight: 600, fontSize: "14px" }}>{label}</span>
+        <span style={{ color, fontWeight: 700, fontSize: "14px" }}>{p}%</span>
+      </div>
+      <div style={{ height: "8px", background: "#e2e8f0", borderRadius: "99px", overflow: "hidden" }}>
+        <div style={{ width: `${p}%`, height: "100%", background: color }} />
+      </div>
+      {detail && <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: "12px" }}>{detail}</p>}
+    </div>
+  );
+}
+
+function fmtWhen(iso) {
+  if (!iso) return "never";
+  return new Date(iso).toLocaleString();
+}
 
 const STATUS_COLOR = {
   ok           : { bg: "#f0fdf4", color: "#16a34a", label: "Online" },
@@ -44,21 +66,40 @@ export default function SystemStatusPage() {
   const [audit, setAudit]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [backup, setBackup]     = useState(null);
+  const [backingUp, setBackingUp] = useState(false);
+  const [sys, setSys]           = useState(null);
 
   async function loadAll() {
     setLoading(true);
     try {
-      const [svc, q, a] = await Promise.allSettled([
+      const [svc, q, a, b, s] = await Promise.allSettled([
         checkServices(),
         getQueue(),
         getAuditLog({ limit: 10 }),
+        getLastBackup(),
+        getSystemStatus(),
       ]);
       if (svc.status === "fulfilled") setServices(svc.value);
       if (q.status   === "fulfilled") setQueue(q.value);
       if (a.status   === "fulfilled") setAudit(a.value);
+      if (b.status   === "fulfilled") setBackup(b.value);
+      if (s.status   === "fulfilled") setSys(s.value);
       setLastRefresh(new Date().toLocaleTimeString());
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleBackup() {
+    setBackingUp(true);
+    try {
+      await createBackup();
+      setBackup(await getLastBackup());
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setBackingUp(false);
     }
   }
 
@@ -103,6 +144,67 @@ export default function SystemStatusPage() {
           ))}
         </div>
       )}
+
+      {/* Resources & model (FR-41) */}
+      <h2 style={{ marginBottom: "14px" }}>AI Model &amp; Resources</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px", marginBottom: "32px" }}>
+        <div style={{ background: "white", borderRadius: "14px", padding: "16px", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}>
+          <p style={{ margin: 0, fontWeight: 600, fontSize: "14px" }}>Extraction model</p>
+          <p style={{ margin: "8px 0 0", fontSize: "18px", fontWeight: 700, color: sys?.model?.loaded ? "#16a34a" : "#c2410c" }}>
+            {sys?.model?.loaded ? "Loaded" : sys?.model?.reachable ? "Idle (not resident)" : "Offline"}
+          </p>
+          <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "12px" }}>{sys?.model?.model || "—"}</p>
+        </div>
+
+        <div style={{ background: "white", borderRadius: "14px", padding: "16px", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}>
+          <p style={{ margin: 0, fontWeight: 600, fontSize: "14px" }}>Queue depth</p>
+          <p style={{ margin: "8px 0 0", fontSize: "26px", fontWeight: 700, color: "#2563eb" }}>{sys?.queue?.depth ?? "—"}</p>
+          <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "12px" }}>
+            {sys?.queue ? `${sys.queue.awaiting_confirm} awaiting confirm · ${sys.queue.failed} failed` : "documents waiting/processing"}
+          </p>
+        </div>
+
+        {sys?.disk && (
+          <Meter label="Disk" pct={sys.disk.used_pct}
+                 detail={`${sys.disk.used_gb} GB used of ${sys.disk.total_gb} GB · ${sys.disk.free_gb} GB free`} />
+        )}
+
+        {sys?.gpu && sys.gpu.length > 0 ? (
+          sys.gpu.map((g, i) => (
+            <Meter key={i} label={`GPU — ${g.name}`} pct={g.util_pct}
+                   detail={`${g.mem_used_mb}/${g.mem_total_mb} MB (${g.mem_pct}% mem)`} />
+          ))
+        ) : (
+          <div style={{ background: "white", borderRadius: "14px", padding: "16px", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}>
+            <p style={{ margin: 0, fontWeight: 600, fontSize: "14px" }}>GPU</p>
+            <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: "13px" }}>
+              No local GPU — inference runs on the Ollama server.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Backup (FR-39) */}
+      <h2 style={{ marginBottom: "14px" }}>Backup</h2>
+      <div style={{
+        background: "white", borderRadius: "16px", padding: "18px 22px", marginBottom: "32px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.06)",
+        display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px",
+      }}>
+        <div>
+          <p style={{ margin: 0, fontWeight: 600 }}>
+            Last successful backup: {backup?.last ? fmtWhen(backup.last.created_at) : "never"}
+          </p>
+          <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "13px" }}>
+            {backup?.total ? `${backup.total} backup(s) on disk · ` : ""}
+            local snapshot of all data + notes (no cloud).
+          </p>
+        </div>
+        <button onClick={handleBackup} disabled={backingUp}
+          style={{ background: "#2563eb", color: "white", border: "none", padding: "10px 20px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+          {backingUp ? "Backing up…" : "Back up now"}
+        </button>
+      </div>
 
       {/* Processing queue */}
       <h2 style={{ marginBottom: "14px" }}>Processing Queue</h2>

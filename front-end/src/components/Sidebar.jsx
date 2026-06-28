@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
   FiHome, FiUpload, FiCalendar, FiCheckSquare,
   FiSearch, FiFileText, FiClock, FiTrash2, FiList, FiActivity,
+  FiMessageCircle, FiMic,
 } from "react-icons/fi";
 
 function Sidebar() {
@@ -10,10 +11,12 @@ function Sidebar() {
   const navItems = [
     { name: "Dashboard",  path: "/dashboard", icon: <FiHome /> },
     { name: "Upload",     path: "/upload",    icon: <FiUpload /> },
+    { name: "Voice",      path: "/voice",     icon: <FiMic /> },
     { name: "Calendar",   path: "/calendar",  icon: <FiCalendar /> },
     { name: "Timeline",   path: "/timeline",  icon: <FiClock /> },
     { name: "Tasks",      path: "/tasks",     icon: <FiCheckSquare /> },
     { name: "Search",     path: "/search",    icon: <FiSearch /> },
+    { name: "Ask AI",     path: "/ask",       icon: <FiMessageCircle /> },
     { name: "Notes",      path: "/notes",     icon: <FiFileText /> },
     { name: "Audit Log",  path: "/audit",     icon: <FiList /> },
     { name: "Trash",      path: "/trash",     icon: <FiTrash2 /> },

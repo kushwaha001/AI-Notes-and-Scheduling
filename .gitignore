@@ -4,6 +4,15 @@ front-end/*.zip
 backend/.env
 .env
 
+# Vector store (rebuilt from documents/notes)
+backend/qdrant_data/
+
+# Local backups
+backend/backups/
+
+# Test artifacts
+backend/test_voice.wav
+
 # Uploaded files — keep folder structure, not content
 backend/uploads/docs/*
 backend/uploads/audio/*
@@ -31,6 +40,8 @@ Thumbs.db
 # Offline bundle artifacts (downloaded/transferred, not source)
 offline/wheels/
 offline/wheels-gpu/
+offline/wheels-bundle/
+offline/models/
 offline/installers/
 offline/*.zip
 offline/*.log

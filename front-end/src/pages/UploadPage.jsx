@@ -4,13 +4,15 @@ import {
   getDocuments,
   deleteDocument,
   getPendingConfirmations,
-  confirmItem,
-  dismissItem,
   documentDownloadUrl,
   getAuditLog,
+  processQueue,
+  checkServices,
+  reextractDocument,
 } from "../services/api";
 import { motion } from "framer-motion";
 import { fmtDate } from "../components/DateInput";
+import ExtractionReviewModal from "../components/ExtractionReviewModal";
 
 const STATUS_COLOR = {
   queued: "#f59e0b", processing: "#3b82f6", ready_to_confirm: "#8b5cf6",
@@ -27,12 +29,40 @@ export default function UploadPage() {
   const [documents, setDocuments] = useState([]);
   const [pending, setPending]     = useState([]);
   const [history, setHistory]     = useState(null); // { doc, entries }
+  const [reviewJob, setReviewJob] = useState(null); // job_id under review
+  const [aiStatus, setAiStatus]   = useState(null); // "ready" | "offline"
+  const [processing, setProcessing] = useState(false);
 
   function loadData() {
     getDocuments().then(setDocuments).catch(() => {});
     getPendingConfirmations().then(setPending).catch(() => {});
+    checkServices().then((s) => setAiStatus(s.ai_extraction)).catch(() => {});
   }
   useEffect(() => { loadData(); }, []);
+
+  // poll while documents are still processing so results appear automatically
+  const queuedCount = documents.filter(
+    (d) => d.status === "queued" || d.status === "processing" ||
+           d.queue_status === "waiting" || d.queue_status === "processing"
+  ).length;
+
+  useEffect(() => {
+    if (queuedCount === 0) return;
+    const id = setInterval(loadData, 5000);
+    return () => clearInterval(id);
+  }, [queuedCount]);
+
+  async function handleProcessQueue() {
+    setProcessing(true);
+    try {
+      await processQueue();
+      setTimeout(loadData, 1500);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setProcessing(false);
+    }
+  }
 
   function onFilesPicked(fileList) {
     const files = Array.from(fileList);
@@ -63,24 +93,18 @@ export default function UploadPage() {
     loadData();
   }
 
-  async function handleConfirm(item) {
-    try {
-      await confirmItem({ job_id: item.job_id, item_index: 0, title: item.filename, item_type: "event" });
-      loadData();
-    } catch (e) { alert(`Confirm failed: ${e.message}`); }
-  }
-
-  async function handleDismiss(item) {
-    try {
-      await dismissItem({ job_id: item.job_id, item_index: 0 });
-      loadData();
-    } catch (e) { alert(`Dismiss failed: ${e.message}`); }
-  }
-
   async function handleDeleteDoc(id) {
     if (!window.confirm("Move document to trash? You can restore it later.")) return;
     try { await deleteDocument(id); loadData(); }
     catch (e) { alert(e.message); }
+  }
+
+  // FR-14a — re-run extraction on a stored document
+  async function handleReextract(id) {
+    try {
+      await reextractDocument(id);
+      setTimeout(loadData, 1500);
+    } catch (e) { alert(e.message); }
   }
 
   // FR-28 — per-item history view
@@ -96,10 +120,48 @@ export default function UploadPage() {
   return (
     <div>
       <h1 style={{ marginBottom: "10px" }}>Upload Documents</h1>
-      <p style={{ color: "#94a3b8", marginBottom: "24px" }}>
+      <p style={{ color: "#94a3b8", marginBottom: "16px" }}>
         Upload letters, notices and scanned mail. PDF, JPG, PNG, TIFF — max 50 MB each,
         up to 20 files per batch.
       </p>
+
+      {/* AI status + run-queue control */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap",
+        background: aiStatus === "ready" ? "#f0fdf4" : "#fff7ed",
+        border: `1px solid ${aiStatus === "ready" ? "#bbf7d0" : "#fed7aa"}`,
+        borderRadius: "14px", padding: "14px 18px", marginBottom: "24px",
+      }}>
+        <span style={{ fontSize: "14px", fontWeight: 600, color: aiStatus === "ready" ? "#15803d" : "#c2410c" }}>
+          {aiStatus === "ready" ? "🤖 AI extraction is ON (gemma3:4b)"
+            : aiStatus == null ? "Checking AI…" : "AI extraction is OFF"}
+        </span>
+        {queuedCount > 0 && (
+          <>
+            <span style={{ color: "#64748b", fontSize: "13px" }}>
+              {queuedCount} document(s) waiting / processing…
+            </span>
+            <button
+              onClick={handleProcessQueue}
+              disabled={processing || aiStatus !== "ready"}
+              style={{
+                marginLeft: "auto",
+                background: aiStatus === "ready" ? "#2563eb" : "#94a3b8",
+                color: "white", border: "none", padding: "8px 18px",
+                borderRadius: "8px", cursor: aiStatus === "ready" ? "pointer" : "not-allowed",
+                fontWeight: 600, fontSize: "14px",
+              }}
+            >
+              {processing ? "Starting…" : "▶ Run AI on queued"}
+            </button>
+          </>
+        )}
+        {aiStatus !== "ready" && aiStatus != null && (
+          <span style={{ color: "#9a3412", fontSize: "13px" }}>
+            Start Ollama and pull the model — see AI-SETUP.md.
+          </span>
+        )}
+      </div>
 
       {/* Drop zone */}
       <div
@@ -174,19 +236,22 @@ export default function UploadPage() {
                   {item.extraction_count > 0 ? ` — ${item.extraction_count} item(s)` : ""}
                 </p>
               </div>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button onClick={() => handleConfirm(item)}
-                  style={{ background: "#10b981", color: "white", border: "none", padding: "8px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: 600 }}>
-                  Confirm
-                </button>
-                <button onClick={() => handleDismiss(item)}
-                  style={{ background: "#ef4444", color: "white", border: "none", padding: "8px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: 600 }}>
-                  Dismiss
-                </button>
-              </div>
+              <button onClick={() => setReviewJob(item.job_id)}
+                style={{ background: "#2563eb", color: "white", border: "none", padding: "9px 20px", borderRadius: "8px", cursor: "pointer", fontWeight: 600 }}>
+                Review &amp; Confirm
+              </button>
             </div>
           ))}
         </div>
+      )}
+
+      {/* Confirm screen (FR-14) */}
+      {reviewJob != null && (
+        <ExtractionReviewModal
+          jobId={reviewJob}
+          onClose={() => setReviewJob(null)}
+          onDone={loadData}
+        />
       )}
 
       {/* Uploaded documents */}
@@ -217,6 +282,11 @@ export default function UploadPage() {
                     style={{ color: "#2563eb", border: "1px solid #2563eb", padding: "4px 12px", borderRadius: "8px", fontSize: "12px", textDecoration: "none" }}>
                     Open
                   </a>
+                  <button onClick={() => handleReextract(doc.id)} disabled={aiStatus !== "ready"}
+                    title={aiStatus === "ready" ? "Re-run AI extraction" : "AI offline"}
+                    style={{ background: "transparent", color: aiStatus === "ready" ? "#0891b2" : "#94a3b8", border: `1px solid ${aiStatus === "ready" ? "#0891b2" : "#cbd5e1"}`, padding: "4px 12px", borderRadius: "8px", cursor: aiStatus === "ready" ? "pointer" : "not-allowed", fontSize: "12px" }}>
+                    Re-extract
+                  </button>
                   <button onClick={() => openHistory(doc)}
                     style={{ background: "transparent", color: "#7c3aed", border: "1px solid #7c3aed", padding: "4px 12px", borderRadius: "8px", cursor: "pointer", fontSize: "12px" }}>
                     History

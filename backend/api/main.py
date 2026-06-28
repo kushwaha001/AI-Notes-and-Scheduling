@@ -22,7 +22,8 @@ from api.routes import (
     documents, events, tasks, voice,
     confirmations, queue, search,
     dashboard, audit, notes,
-    trash, timeline,
+    trash, timeline, ask, backup,
+    system, reminders, links,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,12 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as exc:
         log.error("Startup DB init failed (continuing anyway): %s", exc)
+    # FR-39 — keep a fresh local snapshot (only runs if none in last 24h)
+    try:
+        from api.routes.backup import auto_backup_if_due
+        auto_backup_if_due()
+    except Exception as exc:
+        log.warning("Startup auto-backup skipped: %s", exc)
     yield
 
 
@@ -68,6 +75,11 @@ app.include_router(audit.router)
 app.include_router(notes.router)
 app.include_router(trash.router)
 app.include_router(timeline.router)
+app.include_router(ask.router)
+app.include_router(backup.router)
+app.include_router(system.router)
+app.include_router(reminders.router)
+app.include_router(links.router)
 
 
 # ── SYSTEM ENDPOINTS ──────────────────────────────────────────
@@ -114,7 +126,21 @@ async def check_services():
     except Exception:
         results["postgres"] = "unreachable"
 
-    # Whisper — loaded on demand in Day 5; report model config only
+    # Docling (document parsing)
+    try:
+        from api.ai.parser import docling_available
+        results["docling"] = "ok" if docling_available() else "not installed"
+    except Exception:
+        results["docling"] = "not installed"
+
+    # Overall AI extraction readiness (Ollama up + Docling installed)
+    try:
+        from api.ai.pipeline import ai_ready
+        results["ai_extraction"] = "ready" if ai_ready() else "offline"
+    except Exception:
+        results["ai_extraction"] = "offline"
+
+    # Whisper — voice transcription, loaded on demand
     results["whisper"] = "configured (loads on first audio upload)"
 
     return results
