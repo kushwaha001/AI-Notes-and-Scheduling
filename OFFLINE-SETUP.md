@@ -122,14 +122,32 @@ cd ..
 Place the copied `front-end\node_modules\` into `front-end\`. No install needed.
 
 ### 5.3 Whisper model cache (local voice)
-Run the bundled installer — it copies the Whisper model(s) into the right place
-with the correct `hub\` structure (the part that's easy to get wrong by hand):
+
+**What's what (don't confuse them):** Whisper = the **1.44 GB model** in
+`offline\models\huggingface-cache\hub\` (the actual "brain") + the **faster-whisper
+engine** (installed with the wheels in 5.1) + your app code. The
+`offline\whisper\` folder is just a **5 KB installer script** — it is *not* the
+model; its only job is to copy the 1.44 GB model into the right cache location.
+
+**Required layout** — `models\` and `whisper\` must sit **side-by-side inside
+`offline\`** (the script finds the model via the relative path `..\models\`):
+```
+offline\
+├── models\            ← the 1.44 GB Whisper model
+├── whisper\           ← the installer script (reads ..\models\)
+└── wheels-bundle\
+```
+
+Run the bundled installer — it copies the model(s) into the user profile with the
+correct `hub\` structure (the part that's easy to get wrong by hand):
 ```powershell
 cd offline\whisper
 powershell -ExecutionPolicy Bypass -File .\install-whisper-cache.ps1
 cd ..\..
 ```
-See `offline\whisper\README.md` for details and how to use a different model.
+Run it **once** (setup only). After that, the backend loads the model from the
+cache automatically the first time you record a voice note. See
+`offline\whisper\README.md` for details and how to use a different model.
 *(Only if you run **in-process** Docling instead of a remote `DOCLING_URL`, also
 copy `offline\models\huggingface-cache` → `%USERPROFILE%\.cache\huggingface` and
 `offline\models\EasyOCR` → `%USERPROFILE%\.EasyOCR`.)*
