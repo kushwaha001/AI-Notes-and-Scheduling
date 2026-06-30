@@ -56,7 +56,13 @@ Appendix A). Otherwise: **don't rebuild.**
 ## 3. What to transfer
 
 Zip the **entire project folder** and carry it across. The items below don't live
-in git, so they must be physically copied:
+in git, so they must be physically copied.
+
+> **If one big zip has failed for you before,** an equivalent split works fine:
+> a **code zip** of the project *without* `offline\` (make sure it still includes
+> `front-end\node_modules\`), plus the `offline\` subfolders — `wheels-bundle\`,
+> `models\`, `whisper\` — sent separately and dropped back into `offline\` on the
+> target (same names).
 
 | Path | Size | Needed on | Status |
 |------|------|-----------|--------|
@@ -76,10 +82,12 @@ service hosts by whoever runs them:
 | docling-serve | Docling + its layout/OCR models on its host |
 | Qdrant | the Qdrant binary, or the Docker image (`docker save`/`load` for air-gap) |
 
-> **If you keep Docling in-process** (leave `DOCLING_URL` blank) instead of using
-> a Docling server, you also need `offline\models\huggingface-cache` (Docling
-> layout models) **and** `offline\models\EasyOCR` on the app PC. With a remote
-> `DOCLING_URL`, the app PC needs **neither** — only the Whisper cache.
+> **This bundle is slimmed to Whisper-only** — `offline\models\` ships just the
+> Whisper cache. The deployment uses a **remote `DOCLING_URL`**, so the app PC
+> needs no Docling/OCR models locally. If you ever want to run Docling
+> **in-process** instead (blank `DOCLING_URL`), you must first **re-stage** the
+> Docling layout cache + `EasyOCR` cache on an internet PC (Appendix B style) —
+> they were removed from this bundle to keep it small.
 
 ---
 
@@ -176,12 +184,13 @@ NO_PROXY=localhost,127.0.0.1,OFFICE-LLM,OFFICE-EMBED,OFFICE-DOCLING,OFFICE-QDRAN
 > which often answers **401 Unauthorized**. List every service host in `NO_PROXY`.
 
 ### 5.5 Verify the links *before* starting the app
-From the app PC (catches problems in seconds):
+From the app PC (catches problems in seconds). **Use `curl.exe`** — in PowerShell
+plain `curl` is an alias for `Invoke-WebRequest` and won't accept `-H`:
 ```powershell
-curl http://OFFICE-LLM:8000/v1/models          # lists the served model
-curl http://OFFICE-EMBED:8001/v1/models
-curl http://OFFICE-DOCLING:5001/health
-curl http://OFFICE-QDRANT:6333/collections      # add  -H "api-key: ..."  if keyed
+curl.exe http://OFFICE-LLM:8000/v1/models          # lists the served model
+curl.exe http://OFFICE-EMBED:8001/v1/models
+curl.exe http://OFFICE-DOCLING:5001/health
+curl.exe http://OFFICE-QDRANT:6333/collections -H "api-key: YOUR_KEY"   # drop -H if not keyed
 ```
 
 ### 5.6 Start it
@@ -200,8 +209,8 @@ Open **http://localhost:5173**.
 
 ### 5.7 Verify health
 ```powershell
-curl http://localhost:9000/health      # {"status":"ok"}
-curl http://localhost:9000/services    # every line should read "ok"
+curl.exe http://localhost:9000/health      # {"status":"ok"}
+curl.exe http://localhost:9000/services    # every line should read "ok"
 ```
 `/services` reports: `llm`, `embeddings`, `qdrant`, `docling`, `postgres`,
 `ai_extraction`, `whisper`. The Status page (admin) shows the same live.
