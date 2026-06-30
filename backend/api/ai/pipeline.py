@@ -21,7 +21,7 @@ def ai_ready() -> bool:
         return False
     try:
         from api.ai.parser import docling_available
-        from api.ai.extractor import model_available
+        from api.ai.llm import model_available
         return docling_available() and model_available()
     except Exception:
         return False

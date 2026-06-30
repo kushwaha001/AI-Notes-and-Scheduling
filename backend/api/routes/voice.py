@@ -82,9 +82,10 @@ def extract_from_transcript(body: TranscriptPayload,
                             user: CurrentUser = Depends(current_user)):
     """FR-12/13 — extract a task/event from the edited transcript (relative dates
     like 'tomorrow' are resolved). If nothing schedulable, it just comes back empty."""
-    from api.ai.extractor import extract_fields, ollama_available
-    if not ollama_available():
-        raise HTTPException(503, "AI model not available (Ollama offline).")
+    from api.ai.extractor import extract_fields
+    from api.ai.llm import llm_available
+    if not llm_available():
+        raise HTTPException(503, "AI model not available (LLM server offline).")
 
     fields = extract_fields(body.transcript)
 

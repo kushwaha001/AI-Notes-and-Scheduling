@@ -1,19 +1,21 @@
 """
-Qdrant vector store (FR-31/FR-32) — embedded local mode, no separate server.
+Qdrant vector store (FR-31/FR-32) — embedded OR server, chosen by config.
 
 Indexes document full-text and notes as embedded chunks, and does semantic
-search. Stored on disk under backend/qdrant_data so it persists across restarts.
+search. When QDRANT_URL is set it talks to a Qdrant server (recommended for
+multi-user / multiple workers); otherwise it uses the embedded on-disk store
+under backend/qdrant_data, which persists across restarts.
 """
 
 import os
 import hashlib
 import logging
 
-from api.config import BASE_DIR
+from api.config import BASE_DIR, QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION
 
 log = logging.getLogger(__name__)
 
-COLLECTION = "udaan_content"
+COLLECTION = QDRANT_COLLECTION
 _client = None
 
 
@@ -21,8 +23,11 @@ def get_client():
     global _client
     if _client is None:
         from qdrant_client import QdrantClient
-        path = os.path.join(BASE_DIR, "qdrant_data")
-        _client = QdrantClient(path=path)   # embedded — no server required
+        if QDRANT_URL:
+            _client = QdrantClient(url=QDRANT_URL, api_key=(QDRANT_API_KEY or None))
+        else:
+            path = os.path.join(BASE_DIR, "qdrant_data")
+            _client = QdrantClient(path=path)   # embedded — no server required
     return _client
 
 

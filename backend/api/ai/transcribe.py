@@ -13,6 +13,7 @@ import logging
 
 from api.config import (
     WHISPER_MODEL, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE, WHISPER_LANGUAGE,
+    WHISPER_BEAM_SIZE,
 )
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _run(model, file_path):
     # vad_filter trims silence (faster + cleaner); language hint skips detection.
     segments, info = model.transcribe(
         file_path,
-        beam_size=1,
+        beam_size=WHISPER_BEAM_SIZE,
         language=WHISPER_LANGUAGE or None,
         vad_filter=True,
     )

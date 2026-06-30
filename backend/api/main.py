@@ -15,7 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import (
-    OLLAMA_HOST, QDRANT_HOST,
+    QDRANT_URL, QDRANT_API_KEY,
     REDIS_HOST, REDIS_PORT, DB_CONFIG,
 )
 from api.routes import (
@@ -95,19 +95,30 @@ async def check_services():
     """NFR-9 — real service health checks for frontend feature gating."""
     results = {}
 
-    # Ollama (local LLM)
+    # LLM (vLLM / Ollama — OpenAI-compatible /v1)
     try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(f"{OLLAMA_HOST}/api/tags")
-        results["ollama"] = "ok" if r.status_code == 200 else "error"
+        from api.ai.llm import llm_available
+        results["llm"] = "ok" if llm_available() else "unreachable"
     except Exception:
-        results["ollama"] = "unreachable"
+        results["llm"] = "unreachable"
 
-    # Qdrant
+    # Embeddings server
     try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(f"{QDRANT_HOST}/collections")
-        results["qdrant"] = "ok" if r.status_code == 200 else "error"
+        from api.ai.embeddings import embed_available
+        results["embeddings"] = "ok" if embed_available() else "unreachable"
+    except Exception:
+        results["embeddings"] = "unreachable"
+
+    # Qdrant — probe the actual mode (server vs embedded), no phantom 401
+    try:
+        if QDRANT_URL:
+            hdr = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else {}
+            async with httpx.AsyncClient(timeout=2) as client:
+                r = await client.get(f"{QDRANT_URL}/collections", headers=hdr)
+            results["qdrant"] = "ok" if r.status_code == 200 else "error"
+        else:
+            from api.ai.vectorstore import vectorstore_available
+            results["qdrant"] = "ok (embedded)" if vectorstore_available() else "error"
     except Exception:
         results["qdrant"] = "unreachable"
 

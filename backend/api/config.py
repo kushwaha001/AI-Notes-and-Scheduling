@@ -23,15 +23,49 @@ ALLOWED_DOCS  = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
 # .webm/.opus are what browsers record via MediaRecorder
 ALLOWED_AUDIO = {".wav", ".mp3", ".m4a", ".ogg", ".webm", ".opus"}
 
-# ── Ollama (local LLM/VLM on Windows + CUDA) ─────────────────
-OLLAMA_HOST  = os.getenv("OLLAMA_HOST",  "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")   # NFR-7: swappable via env
+# ── LLM (OpenAI-compatible API: vLLM, Ollama /v1, TEI, …) ─────
+# Every model is reached by URL now (NFR-7). vLLM and Ollama both expose the
+# OpenAI-compatible /v1 API, so one client works for either — just point the URL.
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+# Model id the server serves (vLLM --served-model-name). Leave EMPTY to auto-pick
+# the first model the server reports at /v1/models (handy when you're unsure).
+LLM_MODEL    = os.getenv("LLM_MODEL", "")
+LLM_API_KEY  = os.getenv("LLM_API_KEY", "")
+# Ask for a strict JSON object back. If a server rejects this param we retry
+# without it automatically, so it's safe to leave on.
+LLM_JSON_MODE = os.getenv("LLM_JSON_MODE", "true").lower() == "true"
+
+# ── Embeddings (OpenAI-compatible: a separate vLLM/TEI, or the same server) ──
+EMBED_BASE_URL = (os.getenv("EMBED_BASE_URL") or LLM_BASE_URL).rstrip("/")
+EMBED_MODEL    = os.getenv("EMBED_MODEL", "bge-m3")
+EMBED_API_KEY  = os.getenv("EMBED_API_KEY", "")
+
+# ── Docling (document parsing) ────────────────────────────────
+# Empty = run Docling in-process (bundled). Set to your running docling-serve base
+# URL (e.g. http://OFFICE-DOCLING:5001) to offload parsing to that server.
+DOCLING_URL          = os.getenv("DOCLING_URL", "").rstrip("/")
+DOCLING_API_KEY      = os.getenv("DOCLING_API_KEY", "")
+DOCLING_CONVERT_PATH = os.getenv("DOCLING_CONVERT_PATH", "/v1/convert/file")
+
+# ── OCR policy ────────────────────────────────────────────────
+# auto  = OCR only when a PDF has no text layer (scans/images); skip digital PDFs
+# force = always OCR;  off = never OCR
+OCR_MODE = os.getenv("OCR_MODE", "auto").lower()
+
+# ── Air-gapped / offline ML mode ──────────────────────────────
+# In a no-internet deployment the model caches are pre-staged, but some ML libs
+# (HuggingFace / Transformers, used by Whisper and in-process Docling) still try
+# to "check for updates" over HTTPS on load — which hangs on a dead network.
+# OFFLINE_MODE=true forces them to use ONLY the local cache. Set it on the
+# air-gapped box; leave false on an internet box that builds the model caches.
+OFFLINE_MODE = os.getenv("OFFLINE_MODE", "false").lower() == "true"
+if OFFLINE_MODE:
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 # ── AI extraction toggles ────────────────────────────────────
 AI_ENABLED           = os.getenv("AI_ENABLED", "true").lower() == "true"
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))  # FR-10/FR-14
-# Keep the model resident in VRAM between requests (efficiency — avoids cold starts)
-OLLAMA_KEEP_ALIVE    = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
 # FR-4 scan-quality floor: fewer readable chars than this → treat as unreadable
 MIN_READABLE_CHARS   = int(os.getenv("MIN_READABLE_CHARS", "25"))
 
@@ -44,10 +78,18 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 # Language hint skips auto-detection (faster + more reliable). Set to "" to
 # auto-detect if you switch to a multilingual model.
 WHISPER_LANGUAGE     = os.getenv("WHISPER_LANGUAGE", "en")
+# Beam search width. 1 = greedy (fastest); 5 = the Whisper default (more accurate,
+# negligible cost on a dedicated GPU). Raise for accuracy, lower for raw speed.
+WHISPER_BEAM_SIZE    = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
 
 # ── Qdrant vector DB ──────────────────────────────────────────
-QDRANT_HOST       = os.getenv("QDRANT_HOST",       "http://localhost:6333")
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "udaan_notes")
+# Empty QDRANT_URL = embedded on-disk store (backend/qdrant_data, single process,
+# zero setup). Set QDRANT_URL to a running server (recommended for multi-user and
+# multiple workers), e.g. http://OFFICE-QDRANT:6333, plus QDRANT_API_KEY if it
+# requires one. The health check follows whichever mode is active.
+QDRANT_URL        = os.getenv("QDRANT_URL", "").rstrip("/")
+QDRANT_API_KEY    = os.getenv("QDRANT_API_KEY", "")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "udaan_content")
 
 # ── Redis cache ───────────────────────────────────────────────
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

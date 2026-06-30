@@ -193,16 +193,29 @@ cp backend/.env.example backend/.env
 # Edit backend/.env with your settings
 ```
 
-Key variables in `.env`:
+Key variables in `.env` (see `backend/.env.example` for the full list, and
+[OFFLINE-SETUP.md](./OFFLINE-SETUP.md) for air-gapped deployment):
 
 ```env
-VLLM_HOST=http://localhost:8000
-VLLM_MODEL=Qwen/Qwen2.5-14B-Instruct-AWQ
-QDRANT_HOST=http://localhost:6333
-REDIS_HOST=localhost
-REDIS_PORT=6379
-DB_URL=postgresql://user:password@localhost:5432/notes_db
-FAITHFULNESS_THRESHOLD=0.8
+# LLM (OpenAI-compatible: vLLM or Ollama). INCLUDE the /v1 suffix.
+LLM_BASE_URL=http://localhost:8000/v1
+LLM_MODEL=                       # blank = auto-pick the served model
+# Embeddings (blank = reuse LLM_BASE_URL)
+EMBED_BASE_URL=http://localhost:8001/v1
+EMBED_MODEL=bge-m3
+# Docling (blank = in-process; or a docling-serve URL)
+DOCLING_URL=
+OCR_MODE=auto
+# Qdrant (blank = embedded local file)
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=udaan_db
+DB_USER=postgres
+DB_PASSWORD=
+CONFIDENCE_THRESHOLD=0.7
 ```
 
 ### 3. Start infrastructure services
@@ -247,7 +260,7 @@ curl http://localhost:9000/health
 # → {"status": "ok", "version": "1.0.0"}
 
 curl http://localhost:9000/services
-# → {"vllm": "ok", "qdrant": "ok", "redis": "ok", "postgres": "ok"}
+# → {"llm":"ok","embeddings":"ok","qdrant":"ok","docling":"ok","postgres":"ok","ai_extraction":"ready"}
 ```
 
 Open `http://localhost:5173` in your browser.

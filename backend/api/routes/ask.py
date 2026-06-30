@@ -12,13 +12,13 @@ import time
 import logging
 from datetime import date
 
-import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from api.db import get_db
 from api.auth import current_user, CurrentUser
-from api.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_KEEP_ALIVE, NOTES_DIR
+from api.config import NOTES_DIR
+from api.ai.llm import generate_json, generate_text
 
 router = APIRouter(tags=["Ask"])
 log = logging.getLogger(__name__)
@@ -66,12 +66,8 @@ def _route_question(question: str) -> dict:
         f"Question: {question}"
     )
     try:
-        r = httpx.post(f"{OLLAMA_HOST}/api/generate",
-                       json={"model": OLLAMA_MODEL, "prompt": prompt, "format": "json",
-                             "stream": False, "keep_alive": OLLAMA_KEEP_ALIVE,
-                             "options": {"temperature": 0}},
-                       timeout=60)
-        return json.loads(r.json().get("response", "{}"))
+        data = json.loads(generate_json(prompt, max_tokens=200))
+        return data if isinstance(data, dict) else {"type": "content"}
     except Exception:
         return {"type": "content"}
 
@@ -135,7 +131,7 @@ def ask(req: AskRequest, user: CurrentUser = Depends(current_user)):
     if not embed_available():
         raise HTTPException(
             503,
-            "Embedding model not available. Run:  ollama pull nomic-embed-text"
+            "Embedding server not reachable. Check EMBED_BASE_URL / EMBED_MODEL."
         )
 
     # Efficiency — return a cached answer for a repeated question.
@@ -155,14 +151,7 @@ def ask(req: AskRequest, user: CurrentUser = Depends(current_user)):
     prompt = _RAG_PROMPT.format(context=context, question=req.q)
 
     try:
-        r = httpx.post(
-            f"{OLLAMA_HOST}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                  "keep_alive": OLLAMA_KEEP_ALIVE, "options": {"temperature": 0.2}},
-            timeout=300,
-        )
-        r.raise_for_status()
-        answer = r.json().get("response", "").strip()
+        answer = generate_text(prompt, temperature=0.2).strip()
     except Exception as e:
         raise HTTPException(503, f"Model error: {e}")
 
@@ -218,7 +207,7 @@ def reindex(user: CurrentUser = Depends(current_user)):
     _CACHE.clear()   # answers may change after reindex
 
     if not embed_available():
-        raise HTTPException(503, "Embedding model not available (ollama pull nomic-embed-text).")
+        raise HTTPException(503, "Embedding server not reachable. Check EMBED_BASE_URL / EMBED_MODEL.")
 
     uid = user["id"]
     indexed_docs = indexed_notes = chunks = 0

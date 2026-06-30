@@ -1,37 +1,62 @@
 """
-Local text embeddings via Ollama (FR-31 semantic search).
+Text embeddings via an OpenAI-compatible server (vLLM, TEI, Ollama /v1).
 
-Uses a small embedding model (default nomic-embed-text). Configurable via
-EMBED_MODEL. Pull it with:  ollama pull nomic-embed-text
+Configure with EMBED_BASE_URL / EMBED_MODEL / EMBED_API_KEY (config.py). Used for
+semantic search and the Ask (RAG) feature. No vendor SDK — plain httpx.
 """
 
-import os
+import logging
 import httpx
 
-from api.config import OLLAMA_HOST, OLLAMA_KEEP_ALIVE
+from api.config import EMBED_BASE_URL, EMBED_MODEL, EMBED_API_KEY
 
-# bge-m3 — stronger retrieval, multilingual, 8192-token context (NFR-1).
-# Swap via EMBED_MODEL; rebuild the index after changing (dim differs per model).
-EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")
+log = logging.getLogger(__name__)
+
+_resolved_model = None
+
+
+def _headers() -> dict:
+    h = {"Content-Type": "application/json"}
+    if EMBED_API_KEY:
+        h["Authorization"] = f"Bearer {EMBED_API_KEY}"
+    return h
+
+
+def _model() -> str:
+    """Configured EMBED_MODEL, or the first model the server reports if blank."""
+    global _resolved_model
+    if EMBED_MODEL:
+        return EMBED_MODEL
+    if _resolved_model:
+        return _resolved_model
+    r = httpx.get(f"{EMBED_BASE_URL}/models", headers=_headers(), timeout=5)
+    r.raise_for_status()
+    data = r.json().get("data") or []
+    if not data:
+        raise RuntimeError(f"No embedding model served at {EMBED_BASE_URL}/models")
+    _resolved_model = data[0].get("id")
+    return _resolved_model
 
 
 def embed(text: str):
-    """Return the embedding vector for a piece of text."""
+    """Return the embedding vector for a piece of text (OpenAI /v1/embeddings)."""
     r = httpx.post(
-        f"{OLLAMA_HOST}/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text or "", "keep_alive": OLLAMA_KEEP_ALIVE},
+        f"{EMBED_BASE_URL}/embeddings",
+        json={"model": _model(), "input": text or ""},
+        headers=_headers(),
         timeout=60,
     )
     r.raise_for_status()
-    return r.json()["embedding"]
+    data = r.json().get("data") or []
+    if not data:
+        raise RuntimeError("Embedding server returned no data")
+    return data[0]["embedding"]
 
 
 def embed_available() -> bool:
-    """True only if the embedding model has been pulled into Ollama."""
+    """True if the embedding server responds at /v1/models."""
     try:
-        r = httpx.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
-        names = [m.get("name", "") for m in r.json().get("models", [])]
-        base = EMBED_MODEL.split(":")[0]
-        return any(n.split(":")[0] == base for n in names)
+        r = httpx.get(f"{EMBED_BASE_URL}/models", headers=_headers(), timeout=3)
+        return r.status_code == 200
     except Exception:
         return False

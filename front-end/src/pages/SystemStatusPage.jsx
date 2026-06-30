@@ -42,6 +42,9 @@ function ServiceBadge({ name, status }) {
       <div>
         <p style={{ margin: 0, fontWeight: 700, fontSize: "15px", textTransform: "capitalize" }}>{name}</p>
         <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "12px" }}>
+          {name === "llm" && "LLM inference (vLLM / Ollama)"}
+          {name === "embeddings" && "Embedding model (semantic search)"}
+          {name === "docling" && "Document parsing / OCR"}
           {name === "ollama" && "Local LLM inference"}
           {name === "qdrant" && "Vector search DB"}
           {name === "redis"  && "Semantic cache"}
