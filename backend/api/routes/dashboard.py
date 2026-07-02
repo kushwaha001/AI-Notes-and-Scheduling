@@ -17,7 +17,7 @@ def pending_replies(user: CurrentUser = Depends(current_user)):
               AND status = 'open'
               AND deleted_at IS NULL
               AND users_id = %s
-              AND (due_date IS NULL OR due_date <= CURRENT_DATE + INTERVAL '2 days')
+              AND (due_date IS NULL OR due_date <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '2 days')
             ORDER BY due_date NULLS LAST
         """, (user["id"],))
         return {"pending_replies": cur.fetchall()}
@@ -35,7 +35,7 @@ def dashboard_summary(user: CurrentUser = Depends(current_user)):
     try:
         cur.execute("""
             SELECT * FROM events
-            WHERE event_date = CURRENT_DATE AND status != 'trashed' AND users_id = %s
+            WHERE event_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND status != 'trashed' AND users_id = %s
             ORDER BY event_time NULLS LAST
         """, (uid,))
         today_events = cur.fetchall()
@@ -52,7 +52,7 @@ def dashboard_summary(user: CurrentUser = Depends(current_user)):
             SELECT * FROM tasks
             WHERE is_reply_task = TRUE AND status = 'open' AND deleted_at IS NULL
               AND users_id = %s
-              AND (due_date IS NULL OR due_date <= CURRENT_DATE + INTERVAL '2 days')
+              AND (due_date IS NULL OR due_date <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '2 days')
             ORDER BY due_date NULLS LAST
         """, (uid,))
         pending_replies = cur.fetchall()

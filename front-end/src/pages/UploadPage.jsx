@@ -14,7 +14,7 @@ import {
   dismissAllExtractions,
 } from "../services/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { fmtDate } from "../components/DateInput";
+import { fmtDate, fmtDateTime } from "../components/DateInput";
 import { useToast } from "../components/ToastProvider";
 
 const STATUS_COLOR = {
@@ -68,9 +68,21 @@ function prettyDate(d) {
   return `${m[3]} ${months[+m[2] - 1]} ${m[1]}`;
 }
 
+// Average the per-field confidence scores into a single 0–100 figure.
+// Confidence is shown ONLY here, at extraction time (per product decision).
+function overallConfidence(fieldConfidence) {
+  if (!fieldConfidence || typeof fieldConfidence !== "object") return null;
+  const vals = Object.values(fieldConfidence).filter((v) => typeof v === "number");
+  if (vals.length === 0) return null;
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return Math.round(avg * 100);
+}
+
 // A clean read-only summary of one extracted item — what will be added.
 function ExtractionPreview({ ex }) {
   const isEvent = ex.item_type === "event" && ex.event_date;
+  const conf = overallConfidence(ex.field_confidence);
+  const lowConf = conf != null && conf < 70;
   const chips = [];
   if (isEvent) {
     if (ex.event_date) chips.push(["📅", prettyDate(ex.event_date)]);
@@ -97,6 +109,18 @@ function ExtractionPreview({ ex }) {
           {isEvent ? "Event" : "Task"}
         </span>
         <strong style={{ fontSize: "14px" }}>{ex.subject || "Untitled"}</strong>
+        {conf != null && (
+          <span
+            title="AI confidence for this extraction (shown at extraction time only)"
+            style={{
+              marginLeft: "auto", fontSize: "11px", fontWeight: 700,
+              padding: "2px 9px", borderRadius: "99px",
+              background: lowConf ? "#fef2f2" : "#f0fdf4",
+              color: lowConf ? "#dc2626" : "#16a34a",
+            }}>
+            {conf}% confident{lowConf ? " · review" : ""}
+          </span>
+        )}
       </div>
       {chips.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
@@ -211,11 +235,16 @@ export default function UploadPage() {
       const bits = [];
       if (res.events_added) bits.push(`${res.events_added} event${res.events_added > 1 ? "s" : ""}`);
       if (res.tasks_added) bits.push(`${res.tasks_added} task${res.tasks_added > 1 ? "s" : ""}`);
-      toast.success(
-        res.total > 0
-          ? `Added ${bits.join(" + ")} to your calendar.`
-          : "Nothing schedulable was found in this document."
-      );
+      const skipped = res.events_skipped
+        ? ` (${res.events_skipped} duplicate${res.events_skipped > 1 ? "s" : ""} skipped)`
+        : "";
+      if (res.total > 0) {
+        toast.success(`Added ${bits.join(" + ")} to your calendar.${skipped}`);
+      } else if (res.events_skipped) {
+        toast.info(`Already on your calendar — ${res.events_skipped} duplicate${res.events_skipped > 1 ? "s" : ""} skipped.`);
+      } else {
+        toast.info("Nothing schedulable was found in this document.");
+      }
       loadData();
     } catch (e) {
       toast.error(e.message);
@@ -558,7 +587,7 @@ export default function UploadPage() {
                   <strong style={{ color: "#2563eb" }}>{entry.action}</strong>
                   {entry.detail ? ` — ${entry.detail}` : ""}
                   <p style={{ margin: "3px 0 0", color: "#94a3b8", fontSize: "12px" }}>
-                    {new Date(entry.created_at).toLocaleString()}
+                    {fmtDateTime(entry.created_at)}
                   </p>
                 </div>
               ))

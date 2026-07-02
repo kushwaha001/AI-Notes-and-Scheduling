@@ -18,12 +18,12 @@ import logging
 import httpx
 
 from api.config import (
-    DOCLING_URL, DOCLING_API_KEY, DOCLING_CONVERT_PATH, OCR_MODE,
+    DOCLING_URL, DOCLING_API_KEY, DOCLING_CONVERT_PATH, OCR_MODE, DOCLING_DEVICE,
 )
 
 log = logging.getLogger(__name__)
 
-_converters = {}   # keyed by do_ocr (bool) — built lazily, reused
+_converters = {}   # keyed by (do_ocr, device) — built lazily, reused
 
 
 # ── OCR policy gate ───────────────────────────────────────────
@@ -67,12 +67,26 @@ def _apply_ssl_fix():
         log.warning("Could not apply SSL fix: %s", e)
 
 
-def _get_converter(do_ocr: bool):
-    """One converter per OCR setting, cached. AUTO picks the GPU when a CUDA torch
-    build is present (OCR + layout on GPU) and falls back to CPU otherwise."""
-    if do_ocr in _converters:
-        return _converters[do_ocr]
+def _resolve_device(force_cpu: bool):
+    """Pick the Docling accelerator device. Honours DOCLING_DEVICE; force_cpu wins
+    (used by the automatic CPU retry after a GPU failure)."""
+    from docling.datamodel.accelerator_options import AcceleratorDevice
+    if force_cpu or DOCLING_DEVICE == "cpu":
+        return AcceleratorDevice.CPU
+    if DOCLING_DEVICE == "cuda":
+        return AcceleratorDevice.CUDA
+    # auto: CUDA when a working CUDA torch build is present, else CPU
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return AcceleratorDevice.CUDA
+    except Exception:
+        pass
+    return AcceleratorDevice.CPU
 
+
+def _get_converter(do_ocr: bool, force_cpu: bool = False):
+    """One converter per (OCR setting, device), cached and reused."""
     _apply_ssl_fix()   # before any model download
     # Imported lazily so the app still starts if docling isn't installed (NFR-9).
     from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -80,13 +94,10 @@ def _get_converter(do_ocr: bool):
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.accelerator_options import AcceleratorOptions, AcceleratorDevice
 
-    device = AcceleratorDevice.AUTO
-    try:
-        import torch
-        if torch.cuda.is_available():
-            device = AcceleratorDevice.CUDA
-    except Exception:
-        pass
+    device = _resolve_device(force_cpu)
+    key = (do_ocr, device)
+    if key in _converters:
+        return _converters[key]
 
     log.info("Initialising Docling converter (do_ocr=%s, device=%s)…", do_ocr, device.value)
 
@@ -102,16 +113,24 @@ def _get_converter(do_ocr: bool):
         InputFormat.IMAGE: PdfFormatOption(pipeline_options=opts),
     }
     conv = DocumentConverter(format_options=fmt)
-    _converters[do_ocr] = conv
+    _converters[key] = conv
     return conv
 
 
-def _parse_local(file_path: str, do_ocr: bool):
-    converter = _get_converter(do_ocr)
+def _is_gpu_error(exc: Exception) -> bool:
+    """Recognise CUDA/GPU out-of-memory or execution failures so we can retry on
+    CPU. Docling wraps these, so we match on the message text."""
+    msg = f"{type(exc).__name__}: {exc}".lower()
+    needles = ("cuda", "cublas", "cudnn", "out of memory", "memory allocation",
+               "gpu", "device-side assert")
+    return any(n in msg for n in needles)
+
+
+def _run_converter(do_ocr: bool, file_path: str, force_cpu: bool):
+    converter = _get_converter(do_ocr, force_cpu=force_cpu)
     result = converter.convert(file_path)
     doc = result.document
     markdown = doc.export_to_markdown()
-
     page_count = None
     try:
         pages = getattr(doc, "pages", None)
@@ -119,8 +138,20 @@ def _parse_local(file_path: str, do_ocr: bool):
             page_count = len(pages)
     except Exception:
         page_count = None
-
     return markdown, page_count
+
+
+def _parse_local(file_path: str, do_ocr: bool):
+    """Parse with Docling. If a GPU run fails (CUDA OOM/cuBLAS on a shared GPU),
+    automatically rebuild the converter on CPU and retry once, so a busy GPU never
+    hard-fails an extraction."""
+    try:
+        return _run_converter(do_ocr, file_path, force_cpu=False)
+    except Exception as e:
+        if DOCLING_DEVICE != "cuda" and _is_gpu_error(e):
+            log.warning("Docling GPU parse failed (%s); retrying on CPU.", e)
+            return _run_converter(do_ocr, file_path, force_cpu=True)
+        raise
 
 
 # ── Remote docling-serve ──────────────────────────────────────
@@ -163,18 +194,46 @@ def _extract_pages(payload):
         return None
 
 
+# ── pypdf plain-text fallback ─────────────────────────────────
+def _pypdf_text(file_path: str):
+    """Extract the embedded text layer of a digital PDF with pypdf. Returns
+    (text, page_count) or (None, None) if there's no usable text. No GPU, no OCR —
+    a last-resort so a text PDF still extracts if Docling can't run at all."""
+    if os.path.splitext(file_path)[1].lower() != ".pdf":
+        return None, None
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(file_path)
+        parts = [(p.extract_text() or "") for p in reader.pages]
+        text = "\n\n".join(parts).strip()
+        return (text, len(reader.pages)) if text else (None, None)
+    except Exception as e:
+        log.warning("pypdf text fallback failed for %s: %s", file_path, e)
+        return None, None
+
+
 # ── Public API ────────────────────────────────────────────────
 def parse_document(file_path: str):
     """Parse a document to (markdown_text, page_count).
 
     Uses the remote docling service when DOCLING_URL is set, else in-process
-    Docling. Raises on failure so the caller can mark the job failed and keep it
-    for retry (NFR-2).
+    Docling. If in-process Docling fails outright (e.g. not installed, or an
+    unrecoverable GPU error), fall back to pypdf's embedded text for digital PDFs
+    so a readable PDF still extracts. Only raises when nothing can read it, so the
+    caller can mark the job failed and keep it for retry (NFR-2).
     """
     do_ocr = _needs_ocr(file_path)
     if DOCLING_URL:
         return _parse_remote(file_path, do_ocr)
-    return _parse_local(file_path, do_ocr)
+    try:
+        return _parse_local(file_path, do_ocr)
+    except Exception as e:
+        text, pages = _pypdf_text(file_path)
+        if text:
+            log.warning("Docling parse failed (%s); used pypdf text fallback (%s chars).",
+                        e, len(text))
+            return text, pages
+        raise
 
 
 def docling_available() -> bool:

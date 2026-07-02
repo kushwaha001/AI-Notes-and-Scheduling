@@ -39,6 +39,10 @@ class NotePayload(BaseModel):
     title         : Optional[str] = "Untitled Note"
     content       : str = ""
     classification: Optional[str] = "General"   # FR-36
+    # Optional: attach this note to a calendar event or task (from the calendar
+    # detail popups). Both must be present together, or both omitted.
+    linked_entity_type: Optional[str] = None    # 'event' | 'task'
+    linked_entity_id  : Optional[int] = None
 
 
 def _note_path(note_id) -> str:
@@ -65,6 +69,18 @@ def _write_body(note_id, title, content):
         f.write(header + content)
 
 
+def _entity_title(cur, entity_type, entity_id, user_id):
+    """Return the title of the linked event/task (owned by the user), or None if
+    it isn't a valid, owned entity."""
+    if entity_type not in ("event", "task") or not entity_id:
+        return None
+    table = "events" if entity_type == "event" else "tasks"
+    cur.execute(f"SELECT title FROM {table} WHERE id = %s AND users_id = %s",
+                (entity_id, user_id))
+    row = cur.fetchone()
+    return row["title"] if row else None
+
+
 @router.get("/notes")
 def list_notes(classification: Optional[str] = None,
                user: CurrentUser = Depends(current_user)):
@@ -72,7 +88,8 @@ def list_notes(classification: Optional[str] = None,
     conn = get_db()
     cur = conn.cursor()
     try:
-        query = ("SELECT id, title, classification, created_at FROM notes "
+        query = ("SELECT id, title, classification, linked_entity_type, "
+                 "linked_entity_id, created_at FROM notes "
                  "WHERE status = 'active' AND users_id = %s")
         params = [user["id"]]
         if classification:
@@ -80,17 +97,64 @@ def list_notes(classification: Optional[str] = None,
             params.append(classification)
         query += " ORDER BY created_at DESC"
         cur.execute(query, params)
+        rows = cur.fetchall()
         notes = []
-        for r in cur.fetchall():
+        for r in rows:
             path = _note_path(r["id"])
             mtime = (datetime.fromtimestamp(os.stat(path).st_mtime).isoformat()
                      if os.path.exists(path) else r["created_at"].isoformat())
             notes.append({
-                "id"            : r["id"],
-                "title"         : r["title"],
-                "classification": r["classification"],
-                "modified_at"   : mtime,
+                "id"                : r["id"],
+                "title"             : r["title"],
+                "classification"    : r["classification"],
+                "modified_at"       : mtime,
+                "linked_entity_type": r["linked_entity_type"],
+                "linked_entity_id"  : r["linked_entity_id"],
+                # human label for the linked event/task (None if it was deleted)
+                "linked_entity_title": _entity_title(
+                    cur, r["linked_entity_type"], r["linked_entity_id"], user["id"]),
             })
+        return {"notes": notes}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _body_preview(note_id, limit=160):
+    """Return a short plaintext preview of a note's body (no title header)."""
+    path = _note_path(note_id)
+    if not os.path.exists(path):
+        return ""
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    body = "\n".join(lines[2:]) if lines and lines[0].startswith("#") else "\n".join(lines)
+    body = body.strip()
+    return body[:limit] + ("…" if len(body) > limit else "")
+
+
+@router.get("/notes/for/{entity_type}/{entity_id}")
+def notes_for_entity(entity_type: str, entity_id: int,
+                     user: CurrentUser = Depends(current_user)):
+    """Notes attached to a specific event or task (shown in its detail popup)."""
+    if entity_type not in ("event", "task"):
+        raise HTTPException(400, "entity_type must be 'event' or 'task'.")
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT id, title, classification, created_at
+            FROM notes
+            WHERE status = 'active' AND users_id = %s
+              AND linked_entity_type = %s AND linked_entity_id = %s
+            ORDER BY created_at DESC
+        """, (user["id"], entity_type, entity_id))
+        notes = [{
+            "id"            : r["id"],
+            "title"         : r["title"],
+            "classification": r["classification"],
+            "created_at"    : r["created_at"].isoformat(),
+            "preview"       : _body_preview(r["id"]),
+        } for r in cur.fetchall()]
         return {"notes": notes}
     finally:
         cur.close()
@@ -126,14 +190,25 @@ def get_note(note_id: int, user: CurrentUser = Depends(current_user)):
 
 @router.post("/notes")
 def create_note(note: NotePayload, user: CurrentUser = Depends(current_user)):
-    """FR-5 — create a note (DB row + Markdown file + audit)."""
+    """FR-5 — create a note (DB row + Markdown file + audit). Optionally attaches
+    the note to an event/task when linked_entity_type/id are supplied."""
     conn = get_db()
     cur = conn.cursor()
     try:
+        # Only accept a link to an event/task the caller actually owns.
+        link_type, link_id = None, None
+        if note.linked_entity_type and note.linked_entity_id:
+            if _entity_title(cur, note.linked_entity_type, note.linked_entity_id, user["id"]) is None:
+                raise HTTPException(404, "Linked event/task not found.")
+            link_type = note.linked_entity_type
+            link_id   = note.linked_entity_id
+
         cur.execute("""
-            INSERT INTO notes (users_id, title, classification, status)
-            VALUES (%s, %s, %s, 'active') RETURNING id
-        """, (user["id"], note.title, note.classification or "General"))
+            INSERT INTO notes (users_id, title, classification, status,
+                               linked_entity_type, linked_entity_id)
+            VALUES (%s, %s, %s, 'active', %s, %s) RETURNING id
+        """, (user["id"], note.title, note.classification or "General",
+              link_type, link_id))
         nid = cur.fetchone()["id"]
 
         _write_body(nid, note.title, note.content)
@@ -145,6 +220,9 @@ def create_note(note: NotePayload, user: CurrentUser = Depends(current_user)):
         """, (nid, note.title))
         conn.commit()
         return {"note_id": nid, "title": note.title, "status": "created"}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))

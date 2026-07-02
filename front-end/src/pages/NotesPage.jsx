@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { getNotes, getNote, createNote, updateNote, deleteNote, getNoteVersions, getNoteVersion } from "../services/api";
-import { fmtDate } from "../components/DateInput";
+import { fmtDate, fmtDateTime } from "../components/DateInput";
 import RelatedItems from "../components/RelatedItems";
 
 const CLASSIFICATIONS = ["General", "Meeting", "Reply", "Review", "Personal", "Restricted", "Confidential"];
@@ -200,6 +200,19 @@ export default function NotesPage() {
                     }}>{n.classification}</span>
                   )}
                 </p>
+                {n.linked_entity_type && (
+                  <p style={{ margin: "3px 0 0" }}>
+                    <span style={{
+                      background: n.linked_entity_type === "event" ? "#eff6ff" : "#f0fdf4",
+                      color: n.linked_entity_type === "event" ? "#2563eb" : "#16a34a",
+                      padding: "1px 8px", borderRadius: "99px", fontWeight: 600, fontSize: "10px",
+                    }}
+                    title={n.linked_entity_title || ""}>
+                      {n.linked_entity_type === "event" ? "📅" : "📋"} on {n.linked_entity_type}
+                      {n.linked_entity_title ? `: ${n.linked_entity_title}` : ""}
+                    </span>
+                  </p>
+                )}
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(n.id); }}
@@ -341,7 +354,7 @@ export default function NotesPage() {
                     padding: "10px 0", borderBottom: "1px solid #f1f5f9",
                   }}>
                     <span style={{ fontSize: "14px" }}>
-                      {new Date(v.saved_at).toLocaleString()}
+                      {fmtDateTime(v.saved_at)}
                     </span>
                     <button onClick={() => viewVersionContent(v.version)}
                       style={{ background: "#eff6ff", color: "#2563eb", border: "none", padding: "5px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}>

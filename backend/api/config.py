@@ -52,6 +52,15 @@ DOCLING_CONVERT_PATH = os.getenv("DOCLING_CONVERT_PATH", "/v1/convert/file")
 # force = always OCR;  off = never OCR
 OCR_MODE = os.getenv("OCR_MODE", "auto").lower()
 
+# Device for in-process Docling (layout + OCR models). On a single GPU that also
+# runs the LLM/Whisper, the layout model can hit CUDA out-of-memory. Options:
+#   auto = use CUDA if available, and automatically fall back to CPU on a GPU
+#          failure (recommended — robust under VRAM pressure);
+#   cpu  = always CPU (safe, slower — the GPU stays free for the LLM/Whisper);
+#   cuda = force CUDA (fastest, but fails if VRAM is exhausted).
+# Ignored when DOCLING_URL is set (remote docling-serve does its own placement).
+DOCLING_DEVICE = os.getenv("DOCLING_DEVICE", "auto").lower()
+
 # ── Air-gapped / offline ML mode ──────────────────────────────
 # In a no-internet deployment the model caches are pre-staged, but some ML libs
 # (HuggingFace / Transformers, used by Whisper and in-process Docling) still try

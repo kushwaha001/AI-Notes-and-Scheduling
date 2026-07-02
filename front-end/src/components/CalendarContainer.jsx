@@ -28,8 +28,8 @@ function eventToSX(e) {
   if (e.event_time) {
     try {
       const time = String(e.event_time).slice(0, 5);
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      const start = Temporal.ZonedDateTime.from(`${dateStr}T${time}:00[${tz}]`);
+      // Render event times in IST (UTC+5:30) regardless of the machine's clock.
+      const start = Temporal.ZonedDateTime.from(`${dateStr}T${time}:00[Asia/Kolkata]`);
       return { id: `event-${e.id}`, title: e.title, start, end: start.add({ hours: 1 }), calendarId: "event" };
     } catch { /* fall back to all-day */ }
   }
@@ -51,7 +51,7 @@ function InnerCalendar({ events, onEventClick, view }) {
   const calendar = useCalendarApp({
     views       : [createViewMonthGrid(), createViewWeek(), createViewDay()],
     defaultView : view || "month-grid",
-    selectedDate: Temporal.Now.plainDateISO(),
+    selectedDate: Temporal.Now.plainDateISO("Asia/Kolkata"),   // "today" in IST
     locale      : "en-GB",   // day-first date formatting (DD/MM/YYYY)
     calendars   : CALENDARS,
     events,
@@ -113,9 +113,13 @@ export default function CalendarContainer({ onCounts, refreshKey, onEventClick, 
     );
   }
 
+  // Key by view AND event set so the schedule-x app is rebuilt with the correct
+  // defaultView whenever the user switches Month/Week/Day. (Relying on setView
+  // alone was unreliable — switching directly between month/week/day sometimes
+  // did nothing; a remount always applies the requested view.)
   return (
     <InnerCalendar
-      key={sxEvents.map((e) => e.id).join(",")}
+      key={`${view || "month-grid"}|${sxEvents.map((e) => e.id).join(",")}`}
       events={sxEvents}
       onEventClick={onEventClick}
       view={view}
