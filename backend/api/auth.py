@@ -113,7 +113,7 @@ def _provision_user(claims: dict) -> CurrentUser:
             """
             INSERT INTO users (username, keycloak_sub, email, display_name, role, last_login)
             VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (keycloak_sub) DO UPDATE
+            ON CONFLICT (keycloak_sub) WHERE keycloak_sub IS NOT NULL DO UPDATE
                SET email        = EXCLUDED.email,
                    display_name = EXCLUDED.display_name,
                    role         = EXCLUDED.role,

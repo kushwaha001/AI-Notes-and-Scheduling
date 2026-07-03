@@ -118,9 +118,16 @@ KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "udaan-frontend")
 # carry aud="account", so this is off by default; turn on if you add an audience
 # mapper for the client.
 KEYCLOAK_VERIFY_AUD = os.getenv("KEYCLOAK_VERIFY_AUD", "false").lower() == "true"
-# Derived OIDC endpoints
+# Internal URL the BACKEND uses to reach Keycloak (JWKS fetch). In Docker the
+# browser hits Keycloak at KEYCLOAK_URL (e.g. http://localhost:8080) so tokens
+# are issued with that issuer, but the backend container must reach it by service
+# name (e.g. http://keycloak:8080). Set KEYCLOAK_INTERNAL_URL to that address;
+# leave blank when the backend and browser reach Keycloak at the same URL.
+KEYCLOAK_INTERNAL_URL = (os.getenv("KEYCLOAK_INTERNAL_URL") or KEYCLOAK_URL).rstrip("/")
+# Derived OIDC endpoints. Issuer is verified against the PUBLIC url (matches the
+# token's `iss`); JWKS is fetched via the INTERNAL url (routable from the backend).
 KEYCLOAK_ISSUER = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}"
-KEYCLOAK_JWKS_URL = f"{KEYCLOAK_ISSUER}/protocol/openid-connect/certs"
+KEYCLOAK_JWKS_URL = f"{KEYCLOAK_INTERNAL_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
 
 # ── PostgreSQL ────────────────────────────────────────────────
 DB_CONFIG = {
