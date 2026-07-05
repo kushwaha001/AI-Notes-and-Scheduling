@@ -121,10 +121,11 @@ def process_document(doc_id: int) -> dict:
             from api.ai.vectorstore import index_text
             if embed_available():
                 cur2 = conn.cursor()
-                cur2.execute("SELECT filename FROM documents WHERE id = %s", (doc_id,))
-                fname = cur2.fetchone()["filename"]
+                cur2.execute("SELECT filename, users_id FROM documents WHERE id = %s", (doc_id,))
+                drow = cur2.fetchone()
                 cur2.close()
-                index_text("document", doc_id, fname, markdown)
+                index_text("document", doc_id, drow["filename"], markdown,
+                           user_id=drow["users_id"])
         except Exception as e:
             log.warning("Semantic indexing skipped for doc %s: %s", doc_id, e)
 

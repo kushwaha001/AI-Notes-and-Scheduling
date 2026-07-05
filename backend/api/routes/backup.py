@@ -12,9 +12,10 @@ import shutil
 import logging
 from datetime import datetime, date, time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from api.db import get_db
+from api.auth import require_admin, CurrentUser
 from api.config import BASE_DIR, NOTES_DIR
 
 router = APIRouter(tags=["Backup"])
@@ -96,7 +97,7 @@ def auto_backup_if_due(max_age_hours: int = 24):
 
 
 @router.post("/backup")
-def create_backup():
+def create_backup(admin: CurrentUser = Depends(require_admin)):
     """Run a backup now."""
     try:
         dest, count = _run_backup()
@@ -107,7 +108,7 @@ def create_backup():
 
 
 @router.get("/backup/last")
-def last_backup():
+def last_backup(admin: CurrentUser = Depends(require_admin)):
     """Last successful backup + total count (for the Status page)."""
     conn = get_db()
     cur = conn.cursor()

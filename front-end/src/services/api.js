@@ -3,11 +3,25 @@
 // overrides this with VITE_API_BASE=http://localhost:9000 (direct, no proxy).
 const BASE = import.meta.env.VITE_API_BASE || "/api";
 
+// v2 auth: the auth layer registers a provider that returns a fresh access
+// token (refreshing if needed). When auth is disabled it's never set, so no
+// Authorization header is sent and the backend attributes everything to the
+// default user — identical to v1.
+let _tokenProvider = null;
+export function setTokenProvider(fn) {
+  _tokenProvider = fn;
+}
+
 async function req(method, path, body) {
   const isForm = body instanceof FormData;
+  const headers = isForm ? {} : { "Content-Type": "application/json" };
+  if (_tokenProvider) {
+    const token = await _tokenProvider();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
   const opts = {
     method,
-    headers: isForm ? {} : { "Content-Type": "application/json" },
+    headers,
     body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
   };
   const res = await fetch(`${BASE}${path}`, opts);
@@ -21,6 +35,10 @@ async function req(method, path, body) {
 // ── Health ────────────────────────────────────────────────────
 export const checkHealth   = () => req("GET", "/health");
 export const checkServices = () => req("GET", "/services");
+
+// ── Auth (v2) ─────────────────────────────────────────────────
+export const getAuthConfig = () => req("GET", "/auth/config");
+export const getMe         = () => req("GET", "/auth/me");
 
 // ── Dashboard ─────────────────────────────────────────────────
 export const getDashboard = () => req("GET", "/dashboard");
@@ -108,6 +126,12 @@ export const getConfirmation = (jobId) => req("GET", `/confirmations/${jobId}`);
 
 export const confirmItem = (data) => req("POST", "/confirmations/confirm", data);
 export const dismissItem = (data) => req("POST", "/confirmations/dismiss", data);
+// One-click: add every extracted item from a job to the calendar/tasks at once.
+export const confirmAllExtractions = (jobId) =>
+  req("POST", "/confirmations/confirm-all", { job_id: jobId });
+// One-click: dismiss every extraction for a job (document is kept).
+export const dismissAllExtractions = (jobId) =>
+  req("POST", "/confirmations/dismiss-all", { job_id: jobId });
 
 export const processQueue = () => req("POST", "/queue/process");
 

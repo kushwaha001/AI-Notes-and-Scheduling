@@ -9,11 +9,12 @@ extraction, reusing the same local model as documents.
 import os
 import logging
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 
 from api.config import AUDIO_DIR, ALLOWED_AUDIO
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Voice"])
 log = logging.getLogger(__name__)
@@ -24,14 +25,16 @@ class TranscriptPayload(BaseModel):
 
 
 @router.post("/upload/voice")
-async def upload_voice(file: UploadFile = File(...)):
+async def upload_voice(file: UploadFile = File(...),
+                       user: CurrentUser = Depends(current_user)):
     """FR-6 — accept audio, transcribe locally (Whisper), keep the audio file."""
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_AUDIO:
         raise HTTPException(400, f"Audio format '{ext}' not supported. Use WAV, MP3, M4A, OGG or WEBM.")
 
     contents = await file.read()
-    dest = os.path.join(AUDIO_DIR, file.filename)
+    # Namespace by owner so identical filenames from different users don't clash.
+    dest = os.path.join(AUDIO_DIR, f"u{user['id']}_{file.filename}")
     with open(dest, "wb") as f:
         f.write(contents)
 
@@ -39,8 +42,8 @@ async def upload_voice(file: UploadFile = File(...)):
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO audio (users_id, file_path, status) VALUES (1, %s, 'transcribing') RETURNING id",
-            (dest,))
+            "INSERT INTO audio (users_id, file_path, status) VALUES (%s, %s, 'transcribing') RETURNING id",
+            (user["id"], dest))
         audio_id = cur.fetchone()["id"]
         conn.commit()
     finally:
@@ -75,7 +78,8 @@ async def upload_voice(file: UploadFile = File(...)):
 
 
 @router.post("/voice/extract")
-def extract_from_transcript(body: TranscriptPayload):
+def extract_from_transcript(body: TranscriptPayload,
+                            user: CurrentUser = Depends(current_user)):
     """FR-12/13 — extract a task/event from the edited transcript (relative dates
     like 'tomorrow' are resolved). If nothing schedulable, it just comes back empty."""
     from api.ai.extractor import extract_fields, ollama_available

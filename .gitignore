@@ -48,6 +48,10 @@ offline/*.log
 *.tar
 front-end/dist/
 
+# Keycloak server distribution (large; unzip locally, don't commit).
+# The realm export + run script under keycloak/ ARE committed.
+keycloak/dist/
+
 # Cloudflare tunnel binary (download locally, don't commit)
 cloudflared.exe
 

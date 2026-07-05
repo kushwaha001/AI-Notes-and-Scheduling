@@ -13,10 +13,11 @@ import logging
 from datetime import date
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 from api.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_KEEP_ALIVE, NOTES_DIR
 
 router = APIRouter(tags=["Ask"])
@@ -75,14 +76,15 @@ def _route_question(question: str) -> dict:
         return {"type": "content"}
 
 
-def _answer_schedule(question: str, route: dict) -> dict:
+def _answer_schedule(question: str, route: dict, user_id: int) -> dict:
     """FR-29 — answer schedule questions exactly from the events database."""
     frm = route.get("from_date")
     to  = route.get("to_date")
     conn = get_db(); cur = conn.cursor()
     try:
-        q = "SELECT title, event_date, event_time, venue FROM events WHERE status != 'trashed'"
-        params = []
+        q = ("SELECT title, event_date, event_time, venue FROM events "
+             "WHERE status != 'trashed' AND users_id = %s")
+        params = [user_id]
         if frm:
             q += " AND event_date >= %s"; params.append(frm)
         if to:
@@ -120,7 +122,7 @@ ANSWER:"""
 
 
 @router.post("/ask")
-def ask(req: AskRequest):
+def ask(req: AskRequest, user: CurrentUser = Depends(current_user)):
     """FR-29/30/32 — route to a DB schedule answer or a RAG content answer."""
     from api.ai.embeddings import embed_available
     from api.ai.vectorstore import search
@@ -128,7 +130,7 @@ def ask(req: AskRequest):
     # FR-32 — schedule questions are answered from the calendar DB, never recall
     route = _route_question(req.q)
     if route.get("type") == "schedule":
-        return _answer_schedule(req.q, route)
+        return _answer_schedule(req.q, route, user["id"])
 
     if not embed_available():
         raise HTTPException(
@@ -136,13 +138,14 @@ def ask(req: AskRequest):
             "Embedding model not available. Run:  ollama pull nomic-embed-text"
         )
 
-    # Efficiency — return a cached answer for a repeated question
-    cache_key = req.q.strip().lower()
+    # Efficiency — return a cached answer for a repeated question.
+    # Cache key is per-user so answers never leak across users.
+    cache_key = f"{user['id']}:{req.q.strip().lower()}"
     cached = _cache_get(cache_key)
     if cached:
         return {**cached, "cached": True}
 
-    hits = search(req.q, req.top_k)
+    hits = search(req.q, req.top_k, user_id=user["id"])
     if not hits:
         return {"answer": "I couldn't find anything relevant in your documents or notes.",
                 "sources": [], "query": req.q}
@@ -181,7 +184,7 @@ def ask(req: AskRequest):
 
 
 @router.post("/ask/similar")
-def similar(req: SimilarRequest):
+def similar(req: SimilarRequest, user: CurrentUser = Depends(current_user)):
     """FR-25 — soft suggestions: semantically similar notes/documents (suggestions
     only; the user decides). Never auto-applied."""
     from api.ai.embeddings import embed_available
@@ -189,7 +192,7 @@ def similar(req: SimilarRequest):
     if not embed_available() or not req.text.strip():
         return {"suggestions": []}
 
-    hits = search(req.text, req.top_k + 3)
+    hits = search(req.text, req.top_k + 3, user_id=user["id"])
     out, seen = [], set()
     for h in hits:
         kind, item_id = h.get("kind"), str(h.get("item_id"))
@@ -207,8 +210,8 @@ def similar(req: SimilarRequest):
 
 
 @router.post("/ask/reindex")
-def reindex():
-    """(Re)build the semantic index from all documents and notes."""
+def reindex(user: CurrentUser = Depends(current_user)):
+    """(Re)build the semantic index from the caller's documents and notes."""
     from api.ai.embeddings import embed_available
     from api.ai.vectorstore import index_text
 
@@ -217,6 +220,7 @@ def reindex():
     if not embed_available():
         raise HTTPException(503, "Embedding model not available (ollama pull nomic-embed-text).")
 
+    uid = user["id"]
     indexed_docs = indexed_notes = chunks = 0
 
     conn = get_db()
@@ -224,15 +228,15 @@ def reindex():
     try:
         cur.execute("""
             SELECT id, filename, full_text FROM documents
-            WHERE full_text IS NOT NULL AND deleted_at IS NULL
-        """)
+            WHERE full_text IS NOT NULL AND deleted_at IS NULL AND users_id = %s
+        """, (uid,))
         for d in cur.fetchall():
-            n = index_text("document", d["id"], d["filename"], d["full_text"])
+            n = index_text("document", d["id"], d["filename"], d["full_text"], user_id=uid)
             if n:
                 indexed_docs += 1
                 chunks += n
 
-        cur.execute("SELECT id, title FROM notes WHERE status = 'active'")
+        cur.execute("SELECT id, title FROM notes WHERE status = 'active' AND users_id = %s", (uid,))
         notes = cur.fetchall()
     finally:
         cur.close()
@@ -244,7 +248,7 @@ def reindex():
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 body = f.read()
-            n = index_text("note", note["id"], note["title"], body)
+            n = index_text("note", note["id"], note["title"], body, user_id=uid)
             if n:
                 indexed_notes += 1
                 chunks += n

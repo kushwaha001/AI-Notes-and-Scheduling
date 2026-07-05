@@ -1,11 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Dashboard"])
 
 
 @router.get("/pending-replies")
-def pending_replies():
+def pending_replies(user: CurrentUser = Depends(current_user)):
     """FR-23 — reply tasks due within 2 days."""
     conn = get_db()
     cur = conn.cursor()
@@ -15,9 +16,10 @@ def pending_replies():
             WHERE is_reply_task = TRUE
               AND status = 'open'
               AND deleted_at IS NULL
+              AND users_id = %s
               AND (due_date IS NULL OR due_date <= CURRENT_DATE + INTERVAL '2 days')
             ORDER BY due_date NULLS LAST
-        """)
+        """, (user["id"],))
         return {"pending_replies": cur.fetchall()}
     finally:
         cur.close()
@@ -25,32 +27,34 @@ def pending_replies():
 
 
 @router.get("/dashboard")
-def dashboard_summary():
+def dashboard_summary(user: CurrentUser = Depends(current_user)):
     """FR-33, FR-34 — aggregated dashboard data."""
     conn = get_db()
     cur = conn.cursor()
+    uid = user["id"]
     try:
         cur.execute("""
             SELECT * FROM events
-            WHERE event_date = CURRENT_DATE AND status != 'trashed'
+            WHERE event_date = CURRENT_DATE AND status != 'trashed' AND users_id = %s
             ORDER BY event_time NULLS LAST
-        """)
+        """, (uid,))
         today_events = cur.fetchall()
 
         cur.execute("""
             SELECT * FROM tasks
-            WHERE status = 'open' AND deleted_at IS NULL
+            WHERE status = 'open' AND deleted_at IS NULL AND users_id = %s
             ORDER BY due_date NULLS LAST
             LIMIT 10
-        """)
+        """, (uid,))
         open_tasks = cur.fetchall()
 
         cur.execute("""
             SELECT * FROM tasks
             WHERE is_reply_task = TRUE AND status = 'open' AND deleted_at IS NULL
+              AND users_id = %s
               AND (due_date IS NULL OR due_date <= CURRENT_DATE + INTERVAL '2 days')
             ORDER BY due_date NULLS LAST
-        """)
+        """, (uid,))
         pending_replies = cur.fetchall()
 
         cur.execute("""
@@ -62,10 +66,10 @@ def dashboard_summary():
                 ON e.source_type = 'document'
                AND e.source_id   = d.id
                AND e.status      = 'pending'
-            WHERE pq.status = 'awaiting_confirm'
+            WHERE pq.status = 'awaiting_confirm' AND d.users_id = %s
             GROUP BY pq.id, d.filename, d.uploaded_at
             ORDER BY d.uploaded_at DESC
-        """)
+        """, (uid,))
         pending_confirmations = cur.fetchall()
 
         return {

@@ -18,10 +18,11 @@ import subprocess
 import logging
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from api.config import BASE_DIR, OLLAMA_HOST, OLLAMA_MODEL
 from api.db import get_db
+from api.auth import require_admin, CurrentUser
 
 router = APIRouter(tags=["System"])
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def _model_status():
 
 
 @router.get("/system/status")
-def system_status():
+def system_status(admin: CurrentUser = Depends(require_admin)):
     """FR-41 — consolidated admin snapshot for the status page."""
     conn = get_db()
     cur = conn.cursor()

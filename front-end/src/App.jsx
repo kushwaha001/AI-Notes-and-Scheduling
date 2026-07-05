@@ -26,6 +26,7 @@ import SystemStatusPage from "./pages/SystemStatusPage";
 import LoadingScreen    from "./components/LoadingScreen";
 
 import { useEffect, useState } from "react";
+import { initAuth } from "./auth/auth";
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -61,10 +62,14 @@ function AnimatedRoutes() {
 
 function App() {
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 1800);
-    return () => clearTimeout(timer);
+    // Resolve auth (Keycloak login when enabled) before rendering the app.
+    // initAuth never throws — on any failure it falls back to no-auth.
+    initAuth()
+      .then((res) => setUser(res.user))
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <LoadingScreen />;
@@ -72,7 +77,7 @@ function App() {
   return (
     <BrowserRouter>
       <ReminderNotifier />
-      <AppShell>
+      <AppShell user={user}>
         <AnimatedRoutes />
       </AppShell>
     </BrowserRouter>

@@ -1,27 +1,44 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from api.models import ConfirmItem, DismissItem
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Confirm"])
 log = logging.getLogger(__name__)
 
 
+def _job_owner(cur, job_id):
+    """Return the user id that owns the document behind a queue job, or None."""
+    cur.execute("""
+        SELECT d.users_id FROM processing_queue pq
+        JOIN documents d ON d.id = pq.document_id
+        WHERE pq.id = %s
+    """, (job_id,))
+    row = cur.fetchone()
+    return row["users_id"] if row else None
+
+
 @router.post("/confirmations/confirm")
-def confirm_item(item: ConfirmItem):
+def confirm_item(item: ConfirmItem, user: CurrentUser = Depends(current_user)):
     """FR-14 — human approves one extracted item (event or task)."""
     conn = get_db()
     cur  = conn.cursor()
 
     try:
+        if _job_owner(cur, item.job_id) != user["id"]:
+            raise HTTPException(404, "Job not found.")
+
         if item.item_type == "event":
             cur.execute("""
                 INSERT INTO events
                     (users_id, title, event_date, event_time, venue, attendees,
                      classification, source, status)
-                VALUES (1, %s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
                 RETURNING id
             """, (
+                user["id"],
                 item.title,
                 item.event_date or None,
                 item.event_time or None,
@@ -49,9 +66,9 @@ def confirm_item(item: ConfirmItem):
                 cur.execute("""
                     INSERT INTO tasks
                         (users_id, title, due_date, is_reply_task, classification, source, status)
-                    VALUES (1, %s, %s, TRUE, 'Reply', 'ai', 'open')
+                    VALUES (%s, %s, %s, TRUE, 'Reply', 'ai', 'open')
                     RETURNING id
-                """, (f"Reply: {item.title}", item.reply_by))
+                """, (user["id"], f"Reply: {item.title}", item.reply_by))
                 reply_id = cur.fetchone()["id"]
                 cur.execute("""
                     INSERT INTO linked_documents
@@ -71,9 +88,10 @@ def confirm_item(item: ConfirmItem):
             cur.execute("""
                 INSERT INTO tasks
                     (users_id, title, due_date, classification, source, status)
-                VALUES (1, %s, %s, %s, 'ai', 'open')
+                VALUES (%s, %s, %s, %s, 'ai', 'open')
                 RETURNING id
             """, (
+                user["id"],
                 item.title,
                 item.due_date or None,
                 item.category or item.priority or None,
@@ -117,6 +135,166 @@ def confirm_item(item: ConfirmItem):
             "message"  : "Event saved to calendar." if item.item_type == "event" else "Task saved.",
         }
 
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+class ConfirmAll(BaseModel):
+    job_id: int
+
+
+@router.post("/confirmations/confirm-all")
+def confirm_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
+    """One-click: insert EVERY pending extraction for a document into the
+    calendar/tasks at once — no per-item review. Used by the simplified upload
+    flow (the user is asked once, after extraction, then everything is added)."""
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        if _job_owner(cur, body.job_id) != user["id"]:
+            raise HTTPException(404, "Job not found.")
+
+        cur.execute("SELECT document_id FROM processing_queue WHERE id = %s", (body.job_id,))
+        row = cur.fetchone()
+        doc_id = row["document_id"] if row else None
+
+        cur.execute("""
+            SELECT id, item_type, subject, event_date, event_time, venue,
+                   attendees, deadline, reply_by
+            FROM   extractions
+            WHERE  source_type = 'document' AND source_id = %s AND status = 'pending'
+            ORDER BY extracted_at
+        """, (doc_id,))
+        rows = cur.fetchall()
+
+        from api.routes.reminders import insert_reminders
+        events_added = tasks_added = 0
+
+        for ex in rows:
+            title = ex["subject"] or "Untitled"
+            is_event = ex["item_type"] == "event" and ex["event_date"] is not None
+
+            if is_event:
+                cur.execute("""
+                    INSERT INTO events
+                        (users_id, title, event_date, event_time, venue, attendees,
+                         source, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
+                    RETURNING id
+                """, (user["id"], title, ex["event_date"], ex["event_time"],
+                      ex["venue"], ex["attendees"]))
+                event_id = cur.fetchone()["id"]
+                events_added += 1
+                # sensible default reminder so the event isn't silent
+                insert_reminders(cur, event_id, ["1day"])
+                cur.execute("""
+                    INSERT INTO linked_documents
+                        (source_type, source_id, entity_type, entity_id, link_type, confirmed)
+                    VALUES ('document', %s, 'event', %s, 'source', TRUE)
+                    ON CONFLICT DO NOTHING
+                """, (doc_id, event_id))
+
+                # a reply-by date becomes a reply task (FR-23)
+                if ex["reply_by"]:
+                    cur.execute("""
+                        INSERT INTO tasks
+                            (users_id, title, due_date, is_reply_task, classification, source, status)
+                        VALUES (%s, %s, %s, TRUE, 'Reply', 'ai', 'open')
+                        RETURNING id
+                    """, (user["id"], f"Reply: {title}", ex["reply_by"]))
+                    reply_id = cur.fetchone()["id"]
+                    tasks_added += 1
+                    cur.execute("""
+                        INSERT INTO linked_documents
+                            (source_type, source_id, entity_type, entity_id, link_type, confirmed)
+                        VALUES ('document', %s, 'task', %s, 'source', TRUE)
+                        ON CONFLICT DO NOTHING
+                    """, (doc_id, reply_id))
+            else:
+                due = ex["deadline"] or ex["reply_by"] or ex["event_date"]
+                cur.execute("""
+                    INSERT INTO tasks
+                        (users_id, title, due_date, classification, source, status)
+                    VALUES (%s, %s, %s, NULL, 'ai', 'open')
+                    RETURNING id
+                """, (user["id"], title, due))
+                task_id = cur.fetchone()["id"]
+                tasks_added += 1
+                cur.execute("""
+                    INSERT INTO linked_documents
+                        (source_type, source_id, entity_type, entity_id, link_type, confirmed)
+                    VALUES ('document', %s, 'task', %s, 'source', TRUE)
+                    ON CONFLICT DO NOTHING
+                """, (doc_id, task_id))
+
+            cur.execute("UPDATE extractions SET status = 'confirmed' WHERE id = %s", (ex["id"],))
+            cur.execute("""
+                INSERT INTO audit_log (action, entity_type, entity_id, detail)
+                VALUES ('confirmed', %s, %s, %s)
+            """, ("event" if is_event else "task", ex["id"], title))
+
+        # clear the job + mark the document done
+        if doc_id is not None:
+            cur.execute("UPDATE processing_queue SET status = 'done', processed_at = NOW() WHERE id = %s",
+                        (body.job_id,))
+            cur.execute("UPDATE documents SET status = 'done' WHERE id = %s", (doc_id,))
+
+        conn.commit()
+        return {
+            "status": "added",
+            "events_added": events_added,
+            "tasks_added": tasks_added,
+            "total": events_added + tasks_added,
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@router.post("/confirmations/dismiss-all")
+def dismiss_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
+    """One-click: dismiss ALL pending extractions for a document (the document
+    itself is kept and stays searchable). Pairs with the simplified upload flow."""
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        if _job_owner(cur, body.job_id) != user["id"]:
+            raise HTTPException(404, "Job not found.")
+
+        cur.execute("SELECT document_id FROM processing_queue WHERE id = %s", (body.job_id,))
+        row = cur.fetchone()
+        doc_id = row["document_id"] if row else None
+
+        cur.execute("""
+            UPDATE extractions SET status = 'dismissed'
+            WHERE source_type = 'document' AND source_id = %s AND status = 'pending'
+        """, (doc_id,))
+        cur.execute("""
+            INSERT INTO audit_log (action, entity_type, entity_id, detail)
+            VALUES ('dismissed', 'document', %s, 'User dismissed all proposals')
+        """, (doc_id,))
+        if doc_id is not None:
+            cur.execute("UPDATE processing_queue SET status = 'dismissed' WHERE id = %s", (body.job_id,))
+            cur.execute("UPDATE documents SET status = 'done' WHERE id = %s", (doc_id,))
+
+        conn.commit()
+        return {"status": "dismissed", "job_id": body.job_id}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -126,11 +304,13 @@ def confirm_item(item: ConfirmItem):
 
 
 @router.post("/confirmations/dismiss")
-def dismiss_item(item: DismissItem):
+def dismiss_item(item: DismissItem, user: CurrentUser = Depends(current_user)):
     """FR-14a — discard proposal but keep the document."""
     conn = get_db()
     cur  = conn.cursor()
     try:
+        if _job_owner(cur, item.job_id) != user["id"]:
+            raise HTTPException(404, "Job not found.")
         cur.execute("""
             UPDATE extractions
             SET status = 'dismissed'
@@ -162,6 +342,9 @@ def dismiss_item(item: DismissItem):
             "job_id" : item.job_id,
             "message": "Proposal dismissed. Document kept and searchable."
         }
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -171,7 +354,7 @@ def dismiss_item(item: DismissItem):
 
 
 @router.get("/confirmations/pending")
-def pending_confirmations():
+def pending_confirmations(user: CurrentUser = Depends(current_user)):
     """Dashboard — documents extracted but awaiting human confirmation."""
     conn = get_db()
     cur  = conn.cursor()
@@ -185,10 +368,10 @@ def pending_confirmations():
                    ON e.source_type = 'document'
                   AND e.source_id   = d.id
                   AND e.status      = 'pending'
-            WHERE  pq.status = 'awaiting_confirm'
+            WHERE  pq.status = 'awaiting_confirm' AND d.users_id = %s
             GROUP BY pq.id, d.filename, d.uploaded_at
             ORDER BY d.uploaded_at DESC
-        """)
+        """, (user["id"],))
         return {"pending": cur.fetchall()}
     finally:
         cur.close()
@@ -196,7 +379,7 @@ def pending_confirmations():
 
 
 @router.get("/confirmations/{job_id}")
-def confirmation_detail(job_id: int):
+def confirmation_detail(job_id: int, user: CurrentUser = Depends(current_user)):
     """FR-14 — the document + its AI-extracted fields for the confirm screen."""
     conn = get_db()
     cur  = conn.cursor()
@@ -206,8 +389,8 @@ def confirmation_detail(job_id: int):
                    d.uploaded_at, d.full_text
             FROM   processing_queue pq
             JOIN   documents d ON d.id = pq.document_id
-            WHERE  pq.id = %s
-        """, (job_id,))
+            WHERE  pq.id = %s AND d.users_id = %s
+        """, (job_id, user["id"]))
         job = cur.fetchone()
         if not job:
             raise HTTPException(404, "Job not found.")

@@ -74,8 +74,11 @@ def delete_item(kind: str, item_id):
         pass
 
 
-def index_text(kind: str, item_id, title: str, text: str) -> int:
-    """Embed and store the text for one item. Returns chunks indexed."""
+def index_text(kind: str, item_id, title: str, text: str, user_id=None) -> int:
+    """Embed and store the text for one item. Returns chunks indexed.
+
+    `user_id` is stamped into each point's payload so semantic search can be
+    scoped to a single owner (v2 multi-user). None = unscoped (legacy)."""
     from qdrant_client.models import PointStruct
     from api.ai.embeddings import embed
 
@@ -90,7 +93,9 @@ def index_text(kind: str, item_id, title: str, text: str) -> int:
         points.append(PointStruct(
             id=_point_id(kind, item_id, idx),
             vector=vec,
-            payload={"kind": kind, "item_id": str(item_id), "title": title or "", "text": ch},
+            payload={"kind": kind, "item_id": str(item_id), "title": title or "",
+                     "text": ch,
+                     "user_id": str(user_id) if user_id is not None else ""},
         ))
 
     delete_item(kind, item_id)          # replace any previous version
@@ -98,12 +103,19 @@ def index_text(kind: str, item_id, title: str, text: str) -> int:
     return len(points)
 
 
-def search(query: str, top_k: int = 5):
-    """Semantic search across all indexed content."""
+def search(query: str, top_k: int = 5, user_id=None):
+    """Semantic search across indexed content. When `user_id` is given, only
+    that owner's content is returned (v2 multi-user isolation)."""
     from api.ai.embeddings import embed
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
     try:
         vec = embed(query)
-        hits = get_client().query_points(COLLECTION, query=vec, limit=top_k).points
+        flt = None
+        if user_id is not None:
+            flt = Filter(must=[FieldCondition(
+                key="user_id", match=MatchValue(value=str(user_id)))])
+        hits = get_client().query_points(
+            COLLECTION, query=vec, limit=top_k, query_filter=flt).points
         return [{"score": float(h.score), **h.payload} for h in hits]
     except Exception as e:
         log.warning("Vector search failed: %s", e)

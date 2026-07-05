@@ -1,9 +1,14 @@
 from typing import Optional
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 from fastapi import APIRouter
 >>>>>>> 162d4fa688f7facfdeedcef9f7f595a90b1d5e55
+=======
+from fastapi import APIRouter, Depends
+>>>>>>> 3f5068ce881006c02bfba08e3a519f0324183c1b
 from api.db import get_db
+from api.auth import require_admin, CurrentUser
 
 router = APIRouter(tags=["Audit"])
 
@@ -11,8 +16,14 @@ router = APIRouter(tags=["Audit"])
 @router.get("/audit-log")
 def get_audit_log(
     entity_type: Optional[str] = None,
+<<<<<<< HEAD
     entity_id: Optional[int] = None,
     limit: int = 50,
+=======
+    entity_id  : Optional[int] = None,
+    limit      : int = 50,
+    admin: CurrentUser = Depends(require_admin),
+>>>>>>> 3f5068ce881006c02bfba08e3a519f0324183c1b
 ):
     """FR-28 — read-only audit log."""
 <<<<<<< HEAD

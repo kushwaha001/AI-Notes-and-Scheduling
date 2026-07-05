@@ -54,6 +54,23 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_TTL  = int(os.getenv("REDIS_TTL",  "3600"))
 
+# ── Authentication (v2 — Keycloak / OIDC) ─────────────────────
+# When AUTH_ENABLED is false the app behaves exactly like v1: every request is
+# attributed to the seeded "default" user (single-user mode). This keeps dev and
+# any air-gapped box where Keycloak isn't running fully functional (NFR-9).
+AUTH_ENABLED   = os.getenv("AUTH_ENABLED", "false").lower() == "true"
+# Base URL of the Keycloak server (no trailing slash), e.g. http://localhost:8080
+KEYCLOAK_URL       = os.getenv("KEYCLOAK_URL", "http://localhost:8080").rstrip("/")
+KEYCLOAK_REALM     = os.getenv("KEYCLOAK_REALM", "udaan")
+KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "udaan-frontend")
+# Verify the token audience against the client id. Keycloak access tokens often
+# carry aud="account", so this is off by default; turn on if you add an audience
+# mapper for the client.
+KEYCLOAK_VERIFY_AUD = os.getenv("KEYCLOAK_VERIFY_AUD", "false").lower() == "true"
+# Derived OIDC endpoints
+KEYCLOAK_ISSUER = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}"
+KEYCLOAK_JWKS_URL = f"{KEYCLOAK_ISSUER}/protocol/openid-connect/certs"
+
 # ── PostgreSQL ────────────────────────────────────────────────
 DB_CONFIG = {
     "host":     os.getenv("DB_HOST",     "localhost"),

@@ -5,10 +5,11 @@ from typing import Optional
 from api.models import ManualEvent, EventUpdate, LinkDocumentRequest
 =======
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from api.models import ManualEvent, EventUpdate
 >>>>>>> 162d4fa688f7facfdeedcef9f7f595a90b1d5e55
 from api.db import get_db
+from api.auth import current_user, CurrentUser
 from api.routes.reminders import insert_reminders
 
 router = APIRouter(tags=["Events"])
@@ -65,7 +66,7 @@ def _occurrence_dates(start: date, frequency: str, interval: int,
 
 
 @router.get("/events/today")
-def events_today():
+def events_today(user: CurrentUser = Depends(current_user)):
     """FR-33 — today's meetings for dashboard."""
     conn = get_db()
     cur = conn.cursor()
@@ -74,8 +75,9 @@ def events_today():
             SELECT * FROM events
             WHERE event_date = CURRENT_DATE
               AND status != 'trashed'
+              AND users_id = %s
             ORDER BY event_time NULLS LAST
-        """)
+        """, (user["id"],))
         events = cur.fetchall()
         return {
             "events": events,
@@ -94,13 +96,14 @@ def list_events(
     from_date: Optional[str] = None,
     to_date  : Optional[str] = None,
     status   : Optional[str] = None,
+    user: CurrentUser = Depends(current_user),
 ):
     """FR-16 — list events with optional date range and status filter."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        query = "SELECT * FROM events WHERE status != 'trashed'"
-        params = []
+        query = "SELECT * FROM events WHERE status != 'trashed' AND users_id = %s"
+        params = [user["id"]]
 
         if from_date:
             query += " AND event_date >= %s"
@@ -121,13 +124,14 @@ def list_events(
 
 
 @router.get("/events/{event_id}")
-def get_event(event_id: int):
+def get_event(event_id: int, user: CurrentUser = Depends(current_user)):
     """FR-16/FR-26/FR-27 — single event with source documents and the
     AI-parsed extraction fields (FR-8, FR-10) that produced it."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT * FROM events WHERE id = %s AND status != 'trashed'", (event_id,))
+        cur.execute("SELECT * FROM events WHERE id = %s AND users_id = %s AND status != 'trashed'",
+                    (event_id, user["id"]))
         event = cur.fetchone()
         if not event:
 <<<<<<< HEAD
@@ -195,6 +199,7 @@ def get_event(event_id: int):
 
 
 @router.post("/events/manual")
+<<<<<<< HEAD
 def create_event_manual(event: ManualEvent):
 <<<<<<< HEAD
     """FR-7 — manual entry, no AI. NFR-9: never depends on vLLM."""
@@ -259,6 +264,10 @@ def create_event_manual(event: ManualEvent):
         raise HTTPException(500, str(e))
 
 =======
+=======
+def create_event_manual(event: ManualEvent,
+                         user: CurrentUser = Depends(current_user)):
+>>>>>>> 3f5068ce881006c02bfba08e3a519f0324183c1b
     """FR-7 manual entry + FR-20 recurring events. NFR-9: never depends on AI."""
     conn = get_db()
     cur = conn.cursor()
@@ -301,10 +310,10 @@ def create_event_manual(event: ManualEvent):
                 INSERT INTO events
                     (users_id, title, event_date, event_time, venue, attendees,
                      classification, source, status, recurrence_id, parent_event_id)
-                VALUES (1, %s, %s, %s, %s, %s, %s, 'manual', 'upcoming', %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'manual', 'upcoming', %s, %s)
                 RETURNING id
             """, (
-                event.title, d, event.event_time or None,
+                user["id"], event.title, d, event.event_time or None,
                 event.venue or None, event.attendees or None,
                 classification, recurrence_id,
                 first_id if i > 0 else None,
@@ -339,7 +348,8 @@ def create_event_manual(event: ManualEvent):
 
 
 @router.patch("/events/{event_id}")
-def update_event(event_id: int, update: EventUpdate):
+def update_event(event_id: int, update: EventUpdate,
+                 user: CurrentUser = Depends(current_user)):
     """FR-16 — edit an existing event."""
     conn = get_db()
     cur = conn.cursor()
@@ -426,11 +436,14 @@ def update_event(event_id: int, update: EventUpdate):
             return {"status": "no changes", "event_id": event_id}
 
         set_clause = ", ".join(f"{k} = %s" for k in fields)
-        values = list(fields.values()) + [event_id]
+        values = list(fields.values()) + [event_id, user["id"]]
         cur.execute(
-            f"UPDATE events SET {set_clause} WHERE id = %s AND status != 'trashed'",
+            f"UPDATE events SET {set_clause} "
+            f"WHERE id = %s AND users_id = %s AND status != 'trashed'",
             values
         )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Event not found.")
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('edited', 'event', %s, %s)
@@ -438,6 +451,9 @@ def update_event(event_id: int, update: EventUpdate):
 
         conn.commit()
         return {"status": "updated", "event_id": event_id}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))
@@ -448,6 +464,7 @@ def update_event(event_id: int, update: EventUpdate):
 
 
 @router.delete("/events/{event_id}")
+<<<<<<< HEAD
 <<<<<<< HEAD
 def delete_event(event_id: int):
     """FR-16 — soft delete, keeps audit trail."""
@@ -489,28 +506,35 @@ def delete_event(event_id: int):
 
 =======
 def delete_event(event_id: int, scope: str = "occurrence"):
+=======
+def delete_event(event_id: int, scope: str = "occurrence",
+                 user: CurrentUser = Depends(current_user)):
+>>>>>>> 3f5068ce881006c02bfba08e3a519f0324183c1b
     """FR-16/FR-20 — soft delete. scope='occurrence' trashes just this event;
     scope='series' trashes the whole recurring series it belongs to."""
     conn = get_db()
     cur = conn.cursor()
     try:
         if scope == "series":
-            cur.execute("SELECT recurrence_id FROM events WHERE id = %s", (event_id,))
+            cur.execute("SELECT recurrence_id FROM events WHERE id = %s AND users_id = %s",
+                        (event_id, user["id"]))
             row = cur.fetchone()
-            rec_id = row["recurrence_id"] if row else None
+            if row is None:
+                raise HTTPException(404, "Event not found.")
+            rec_id = row["recurrence_id"]
             if rec_id is not None:
                 cur.execute("""
                     UPDATE events SET status = 'trashed', deleted_at = NOW()
-                    WHERE recurrence_id = %s AND status != 'trashed'
+                    WHERE recurrence_id = %s AND users_id = %s AND status != 'trashed'
                     RETURNING id
-                """, (rec_id,))
+                """, (rec_id, user["id"]))
                 trashed = [r["id"] for r in cur.fetchall()]
             else:
                 # not actually recurring — fall back to single delete
                 cur.execute("""
                     UPDATE events SET status = 'trashed', deleted_at = NOW()
-                    WHERE id = %s AND status != 'trashed' RETURNING id
-                """, (event_id,))
+                    WHERE id = %s AND users_id = %s AND status != 'trashed' RETURNING id
+                """, (event_id, user["id"]))
                 trashed = [r["id"] for r in cur.fetchall()]
             cur.execute("""
                 INSERT INTO audit_log (action, entity_type, entity_id, detail)
@@ -522,14 +546,19 @@ def delete_event(event_id: int, scope: str = "occurrence"):
         # single occurrence
         cur.execute("""
             UPDATE events SET status = 'trashed', deleted_at = NOW()
-            WHERE id = %s AND status != 'trashed'
-        """, (event_id,))
+            WHERE id = %s AND users_id = %s AND status != 'trashed'
+        """, (event_id, user["id"]))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Event not found.")
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('trashed', 'event', %s, 'Soft deleted by user')
         """, (event_id,))
         conn.commit()
         return {"status": "deleted", "scope": "occurrence", "event_id": event_id}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))
@@ -540,6 +569,7 @@ def delete_event(event_id: int, scope: str = "occurrence"):
 
 
 @router.post("/events/{event_id}/link-document")
+<<<<<<< HEAD
 <<<<<<< HEAD
 def link_document_to_event(
     event_id: int,
@@ -645,18 +675,35 @@ def link_document_to_event(
         conn.close()
 =======
 def link_document_to_event(event_id: int, body: dict):
+=======
+def link_document_to_event(event_id: int, body: dict,
+                           user: CurrentUser = Depends(current_user)):
+>>>>>>> 3f5068ce881006c02bfba08e3a519f0324183c1b
     """Q7 — link a second source document to an existing event."""
     conn = get_db()
     cur = conn.cursor()
     try:
+        doc_id = body.get("doc_id")
+        # Both the event and the document must belong to the caller.
+        cur.execute("SELECT 1 FROM events WHERE id = %s AND users_id = %s",
+                    (event_id, user["id"]))
+        if cur.fetchone() is None:
+            raise HTTPException(404, "Event not found.")
+        cur.execute("SELECT 1 FROM documents WHERE id = %s AND users_id = %s",
+                    (doc_id, user["id"]))
+        if cur.fetchone() is None:
+            raise HTTPException(404, "Document not found.")
         cur.execute("""
             INSERT INTO linked_documents
                 (source_type, source_id, entity_type, entity_id, link_type, confirmed)
             VALUES ('document', %s, 'event', %s, 'source', TRUE)
             ON CONFLICT DO NOTHING
-        """, (body.get("doc_id"), event_id))
+        """, (doc_id, event_id))
         conn.commit()
         return {"status": "linked", "event_id": event_id, "doc_id": body.get("doc_id")}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))
