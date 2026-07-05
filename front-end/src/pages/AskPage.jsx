@@ -100,7 +100,7 @@ export default function AskPage() {
           {error}
           {error.includes("Embedding") && (
             <p style={{ margin: "8px 0 0", fontSize: "13px" }}>
-              Pull the embedding model: <code>ollama pull nomic-embed-text</code>, then click “Rebuild index”.
+              Check the embedding server (<code>EMBED_BASE_URL</code> / <code>EMBED_MODEL</code>), then click “Rebuild index”.
             </p>
           )}
         </div>

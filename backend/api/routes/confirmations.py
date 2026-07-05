@@ -20,6 +20,25 @@ def _job_owner(cur, job_id):
     return row["users_id"] if row else None
 
 
+def _find_duplicate_event(cur, user_id, title, event_date):
+    """Return the id of an existing (non-trashed) event with the same title on the
+    same day for this user, or None. Prevents the same event being added twice —
+    e.g. re-extracting a document or confirming twice. Title match is
+    case-insensitive and whitespace-trimmed; a NULL date can't duplicate."""
+    if not event_date or not title:
+        return None
+    cur.execute("""
+        SELECT id FROM events
+        WHERE users_id = %s
+          AND event_date = %s
+          AND status != 'trashed'
+          AND LOWER(TRIM(title)) = LOWER(TRIM(%s))
+        LIMIT 1
+    """, (user_id, event_date, title))
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
 @router.post("/confirmations/confirm")
 def confirm_item(item: ConfirmItem, user: CurrentUser = Depends(current_user)):
     """FR-14 — human approves one extracted item (event or task)."""
@@ -31,6 +50,44 @@ def confirm_item(item: ConfirmItem, user: CurrentUser = Depends(current_user)):
             raise HTTPException(404, "Job not found.")
 
         if item.item_type == "event":
+            # Duplicate guard — if this event is already on the calendar for the
+            # same day, don't add it again. We still link the source document and
+            # mark the extraction confirmed, then report it as a duplicate.
+            dup_id = _find_duplicate_event(cur, user["id"], item.title, item.event_date or None)
+            if dup_id is not None:
+                cur.execute("""
+                    INSERT INTO linked_documents
+                        (source_type, source_id, entity_type, entity_id, link_type, confirmed)
+                    SELECT 'document', document_id, 'event', %s, 'source', TRUE
+                    FROM   processing_queue
+                    WHERE  id = %s
+                    LIMIT  1
+                    ON CONFLICT DO NOTHING
+                """, (dup_id, item.job_id))
+                cur.execute("""
+                    UPDATE extractions SET status = 'confirmed'
+                    WHERE source_type = 'document' AND id = %s AND status = 'pending'
+                """, (item.item_index,))
+                cur.execute("SELECT document_id FROM processing_queue WHERE id = %s", (item.job_id,))
+                row = cur.fetchone()
+                doc_id = row["document_id"] if row else None
+                if doc_id is not None:
+                    cur.execute("""
+                        SELECT COUNT(*) AS n FROM extractions
+                        WHERE source_type = 'document' AND source_id = %s AND status = 'pending'
+                    """, (doc_id,))
+                    if cur.fetchone()["n"] == 0:
+                        cur.execute("UPDATE processing_queue SET status = 'done', processed_at = NOW() WHERE id = %s", (item.job_id,))
+                        cur.execute("UPDATE documents SET status = 'done' WHERE id = %s", (doc_id,))
+                conn.commit()
+                return {
+                    "status"   : "duplicate",
+                    "item_type": "event",
+                    "id"       : dup_id,
+                    "title"    : item.title,
+                    "message"  : f"“{item.title}” is already on the calendar for that day — not added again.",
+                }
+
             cur.execute("""
                 INSERT INTO events
                     (users_id, title, event_date, event_time, venue, attendees,
@@ -175,13 +232,29 @@ def confirm_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
         rows = cur.fetchall()
 
         from api.routes.reminders import insert_reminders
-        events_added = tasks_added = 0
+        events_added = tasks_added = events_skipped = 0
 
         for ex in rows:
             title = ex["subject"] or "Untitled"
             is_event = ex["item_type"] == "event" and ex["event_date"] is not None
 
             if is_event:
+                # Duplicate guard — skip an event already on the calendar for the
+                # same day (also catches duplicates within this same batch, since
+                # rows are inserted as we iterate). The extraction is still marked
+                # confirmed and the source document linked to the existing event.
+                dup_id = _find_duplicate_event(cur, user["id"], title, ex["event_date"])
+                if dup_id is not None:
+                    cur.execute("""
+                        INSERT INTO linked_documents
+                            (source_type, source_id, entity_type, entity_id, link_type, confirmed)
+                        VALUES ('document', %s, 'event', %s, 'source', TRUE)
+                        ON CONFLICT DO NOTHING
+                    """, (doc_id, dup_id))
+                    cur.execute("UPDATE extractions SET status = 'confirmed' WHERE id = %s", (ex["id"],))
+                    events_skipped += 1
+                    continue
+
                 cur.execute("""
                     INSERT INTO events
                         (users_id, title, event_date, event_time, venue, attendees,
@@ -251,6 +324,7 @@ def confirm_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
             "status": "added",
             "events_added": events_added,
             "tasks_added": tasks_added,
+            "events_skipped": events_skipped,
             "total": events_added + tasks_added,
         }
     except HTTPException:

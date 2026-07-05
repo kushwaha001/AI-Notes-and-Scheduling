@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { getAuditLog } from "../services/api";
+import { fmtTime, IST_TZ } from "../components/DateInput";
 
 const ACTION_COLOR = {
   uploaded:     "#2563eb",
@@ -39,8 +40,10 @@ export default function AuditLogPage() {
   // group by calendar day for readability
   const groups = {};
   entries.forEach((e) => {
-    const day = new Date(e.created_at).toLocaleDateString("en-GB", {
-      day: "2-digit", month: "short", year: "numeric",
+    const day = new Date(e.created_at.includes("T") && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(e.created_at)
+      ? e.created_at + "Z" : e.created_at
+    ).toLocaleDateString("en-GB", {
+      timeZone: IST_TZ, day: "2-digit", month: "short", year: "numeric",
     });
     (groups[day] ||= []).push(e);
   });
@@ -135,7 +138,7 @@ export default function AuditLogPage() {
                   </span>
                 </div>
                 <span style={{ color: "#94a3b8", fontSize: "12px", whiteSpace: "nowrap" }}>
-                  {new Date(e.created_at).toLocaleTimeString()}
+                  {fmtTime(e.created_at)}
                 </span>
               </motion.div>
             ))}

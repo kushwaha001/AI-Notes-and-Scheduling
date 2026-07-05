@@ -20,7 +20,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends
 
-from api.config import BASE_DIR, OLLAMA_HOST, OLLAMA_MODEL
+from api.config import BASE_DIR, LLM_BASE_URL, LLM_MODEL, LLM_API_KEY
 from api.db import get_db
 from api.auth import require_admin, CurrentUser
 
@@ -71,20 +71,22 @@ def _disk_stats():
 
 
 def _model_status():
-    """Ask Ollama which models are currently resident in memory (FR-41 'is the
-    model loaded'). Falls back to checking the model is at least pulled."""
-    info = {"loaded": False, "model": OLLAMA_MODEL, "resident": [], "reachable": False}
+    """Ask the LLM server which models it serves (FR-41 'is the model loaded').
+    Works with any OpenAI-compatible server (vLLM, Ollama /v1)."""
+    info = {"loaded": False, "model": LLM_MODEL or "(auto)", "resident": [], "reachable": False}
+    hdr = {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
     try:
         with httpx.Client(timeout=3) as c:
-            ps = c.get(f"{OLLAMA_HOST}/api/ps")
-            if ps.status_code == 200:
+            r = c.get(f"{LLM_BASE_URL}/models", headers=hdr)
+            if r.status_code == 200:
                 info["reachable"] = True
-                running = [m.get("name", "") for m in ps.json().get("models", [])]
-                info["resident"] = running
-                info["loaded"] = any(OLLAMA_MODEL.split(":")[0] in r for r in running)
-            if not info["reachable"]:
-                tags = c.get(f"{OLLAMA_HOST}/api/tags")
-                info["reachable"] = tags.status_code == 200
+                ids = [m.get("id", "") for m in (r.json().get("data") or [])]
+                info["resident"] = ids
+                if LLM_MODEL:
+                    base = LLM_MODEL.split(":")[0]
+                    info["loaded"] = any(i == LLM_MODEL or i.split(":")[0] == base for i in ids)
+                else:
+                    info["loaded"] = len(ids) > 0
     except Exception:
         pass
     return info

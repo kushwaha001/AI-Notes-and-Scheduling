@@ -71,9 +71,10 @@ def events_today(user: CurrentUser = Depends(current_user)):
     conn = get_db()
     cur = conn.cursor()
     try:
+        # "Today" is the IST calendar day (the DB session runs in UTC).
         cur.execute("""
             SELECT * FROM events
-            WHERE event_date = CURRENT_DATE
+            WHERE event_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
               AND status != 'trashed'
               AND users_id = %s
             ORDER BY event_time NULLS LAST

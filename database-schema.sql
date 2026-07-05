@@ -143,13 +143,16 @@ CREATE TABLE notes (
     id                  SERIAL PRIMARY KEY,
     users_id            INT NOT NULL REFERENCES users(id),
     title               TEXT,
-    classification      TEXT,                                 
-    current_version_id  INT,                                 
+    classification      TEXT,
+    current_version_id  INT,
+    linked_entity_type  TEXT CHECK (linked_entity_type IN ('event','task')),  -- note attached to an event/task (optional)
+    linked_entity_id    INT,
     status              TEXT NOT NULL DEFAULT 'active'
                             CHECK (status IN ('active','trashed')),
     deleted_at          TIMESTAMP,                             -- FR-19
     created_at          TIMESTAMP DEFAULT NOW()
 );
+CREATE INDEX idx_notes_linked_entity ON notes(linked_entity_type, linked_entity_id);
 
 CREATE TABLE note_versions (
     id            SERIAL PRIMARY KEY,

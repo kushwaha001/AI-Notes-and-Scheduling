@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { getEvent, documentDownloadUrl } from "../services/api";
-import { fmtDate, fmtDateTime } from "./DateInput";
+import { getTask, updateTask, deleteTask, documentDownloadUrl } from "../services/api";
+import DateInput, { fmtDate, toApiDate, fmtDateTime } from "./DateInput";
 import EntityNotes from "./EntityNotes";
 
-// Confidence is intentionally NOT shown here — per product decision it appears
-// only at extraction time (on the Upload review screen), not in the saved-event
-// detail popup.
 function Field({ label, value }) {
   if (value === null || value === undefined || value === "") return null;
   return (
@@ -19,27 +16,56 @@ function Field({ label, value }) {
   );
 }
 
-export default function EventDetailModal({ eventId, onClose, onEdit, onDelete }) {
+// Self-contained task detail popup — mirrors EventDetailModal. Handles its own
+// mark-done / reschedule / delete and calls onChanged so the calendar refreshes.
+export default function TaskDetailModal({ taskId, onClose, onChanged }) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState("");
-  const [docPopup, setDocPopup] = useState(null); // small source popup
+  const [docPopup, setDocPopup] = useState(null);
+  const [dueEdit, setDueEdit] = useState("");   // reschedule field (empty = not editing)
+  const [busy, setBusy]       = useState(false);
 
-  useEffect(() => {
-    if (eventId == null) return;
+  function reload() {
     setLoading(true);
-    getEvent(eventId)
+    getTask(taskId)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [eventId]);
+  }
 
-  if (eventId == null) return null;
+  useEffect(() => {
+    if (taskId == null) return;
+    reload();
+  }, [taskId]);
 
-  const ev          = data?.event;
+  if (taskId == null) return null;
+
+  const task        = data?.task;
   const docs        = data?.source_documents ?? [];
   const extractions = data?.extractions ?? [];
   const history     = data?.history ?? [];
+
+  async function markDone() {
+    setBusy(true);
+    try { await updateTask(task.id, { status: task.status === "done" ? "open" : "done" }); onChanged?.(); reload(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function saveDue() {
+    setBusy(true);
+    try { await updateTask(task.id, { due_date: toApiDate(dueEdit) }); setDueEdit(""); onChanged?.(); reload(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function removeTask() {
+    if (!window.confirm("Move task to trash? You can restore it later.")) return;
+    setBusy(true);
+    try { await deleteTask(task.id); onChanged?.(); onClose(); }
+    catch (e) { setError(e.message); setBusy(false); }
+  }
 
   return (
     <div
@@ -67,11 +93,11 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
           position: "sticky", top: 0, background: "white", borderRadius: "22px 22px 0 0",
         }}>
           <div>
-            <p style={{ margin: "0 0 4px", color: "#60a5fa", fontSize: "12px", textTransform: "uppercase", letterSpacing: "1px" }}>
-              Event Details
+            <p style={{ margin: "0 0 4px", color: "#16a34a", fontSize: "12px", textTransform: "uppercase", letterSpacing: "1px" }}>
+              Task Details
             </p>
             <h2 style={{ margin: 0, fontSize: "24px" }}>
-              {loading ? "Loading…" : ev?.title || "Event"}
+              {loading ? "Loading…" : task?.title || "Task"}
             </h2>
           </div>
           <button onClick={onClose}
@@ -83,58 +109,63 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
         <div style={{ padding: "22px 26px" }}>
           {error && <p style={{ color: "#ef4444" }}>{error}</p>}
 
-          {ev && (
+          {task && (
             <>
-              {/* Core event fields */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", marginBottom: "20px" }}>
-                <Field label="Date" value={fmtDate(ev.event_date)} />
-                <Field label="Time" value={ev.event_time ? String(ev.event_time).slice(0, 5) : ""} />
-                <Field label="Venue" value={ev.venue} />
-                <Field label="Attendees" value={ev.attendees} />
-                <Field label="Classification" value={ev.classification} />
-                <Field label="Source" value={ev.source} />
+              {/* Core task fields */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", marginBottom: "16px" }}>
+                <Field label="Due date" value={task.due_date ? fmtDate(task.due_date) : "No due date"} />
+                <Field label="Status" value={task.status} />
+                <Field label="Category" value={task.classification} />
+                <Field label="Source" value={task.source} />
+                {task.is_reply_task && <Field label="Type" value="Reply task" />}
               </div>
+
+              {/* Reschedule */}
+              {dueEdit === "" ? (
+                <button onClick={() => setDueEdit(task.due_date ? String(task.due_date).split("T")[0] : "")}
+                  style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", padding: "6px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px", marginBottom: "18px" }}>
+                  Reschedule due date
+                </button>
+              ) : (
+                <div style={{ display: "flex", alignItems: "flex-end", gap: "10px", marginBottom: "18px" }}>
+                  <DateInput label="New due date" value={dueEdit} onChange={setDueEdit} />
+                  <button onClick={saveDue} disabled={busy}
+                    style={{ background: "#2563eb", color: "white", border: "none", padding: "9px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 600 }}>
+                    Save
+                  </button>
+                  <button onClick={() => setDueEdit("")}
+                    style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "9px 16px", borderRadius: "8px", cursor: "pointer" }}>
+                    Cancel
+                  </button>
+                </div>
+              )}
 
               {/* Summary / Additional Detail (AI-parsed when available) */}
-              <div style={{
-                background: "#f8fafc", borderRadius: "14px", padding: "16px 18px",
-                marginBottom: "18px", border: "1px solid #e2e8f0",
-              }}>
-                <h3 style={{ margin: "0 0 12px", fontSize: "15px" }}>
-                  Summary / Additional Detail
-                </h3>
-                {extractions.length === 0 ? (
-                  <p style={{ margin: 0, color: "#94a3b8", fontSize: "13px" }}>
-                    {ev.source === "manual"
-                      ? "This event was created manually — no additional detail."
-                      : "No additional detail is linked to this event yet."}
-                  </p>
-                ) : (
-                  extractions.map((ex, i) => {
-                    return (
-                      <div key={i} style={{ marginBottom: i < extractions.length - 1 ? "16px" : 0 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
-                          <Field label="Subject"    value={ex.subject} />
-                          <Field label="Date"       value={ex.event_date ? fmtDate(ex.event_date) : ""} />
-                          <Field label="Time"       value={ex.event_time ? String(ex.event_time).slice(0,5) : ""} />
-                          <Field label="Venue"      value={ex.venue} />
-                          <Field label="Attendees"  value={ex.attendees} />
-                          <Field label="Reference#" value={ex.ref_number} />
-                          <Field label="Deadline"   value={ex.deadline ? fmtDate(ex.deadline) : ""} />
-                          <Field label="Reply by"   value={ex.reply_by ? fmtDate(ex.reply_by) : ""} />
-                        </div>
-                        {ex.model_name && (
-                          <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "11px" }}>
-                            Extracted by {ex.model_name} · {ex.extracted_at ? fmtDate(ex.extracted_at) : ""}
-                          </p>
-                        )}
+              {extractions.length > 0 && (
+                <div style={{
+                  background: "#f8fafc", borderRadius: "14px", padding: "16px 18px",
+                  marginBottom: "18px", border: "1px solid #e2e8f0",
+                }}>
+                  <h3 style={{ margin: "0 0 12px", fontSize: "15px" }}>Summary / Additional Detail</h3>
+                  {extractions.map((ex, i) => (
+                    <div key={i} style={{ marginBottom: i < extractions.length - 1 ? "16px" : 0 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
+                        <Field label="Subject"    value={ex.subject} />
+                        <Field label="Deadline"   value={ex.deadline ? fmtDate(ex.deadline) : ""} />
+                        <Field label="Reply by"   value={ex.reply_by ? fmtDate(ex.reply_by) : ""} />
+                        <Field label="Reference#" value={ex.ref_number} />
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                      {ex.model_name && (
+                        <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "11px" }}>
+                          Extracted by {ex.model_name} · {ex.extracted_at ? fmtDate(ex.extracted_at) : ""}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
-              {/* Official Document — opens a small popup */}
+              {/* Official Document */}
               {docs.length > 0 && (
                 <div style={{ marginBottom: "18px" }}>
                   <h3 style={{ margin: "0 0 10px", fontSize: "15px" }}>Official Document</h3>
@@ -154,8 +185,8 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
                 </div>
               )}
 
-              {/* Notes attached to this event */}
-              <EntityNotes entityType="event" entityId={ev.id} />
+              {/* Notes attached to this task */}
+              <EntityNotes entityType="task" entityId={task.id} />
 
               {/* History */}
               {history.length > 0 && (
@@ -166,7 +197,7 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
                   <div style={{ marginTop: "10px" }}>
                     {history.map((h, i) => (
                       <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid #f1f5f9", fontSize: "13px" }}>
-                        <strong style={{ color: "#2563eb" }}>{h.action}</strong>
+                        <strong style={{ color: "#16a34a" }}>{h.action}</strong>
                         {h.detail ? ` — ${h.detail}` : ""}
                         <span style={{ float: "right", color: "#94a3b8", fontSize: "11px" }}>
                           {fmtDateTime(h.created_at)}
@@ -179,13 +210,13 @@ export default function EventDetailModal({ eventId, onClose, onEdit, onDelete })
 
               {/* Actions */}
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", borderTop: "1px solid #f1f5f9", paddingTop: "16px" }}>
-                <button onClick={() => onDelete(ev.id)}
+                <button onClick={removeTask} disabled={busy}
                   style={{ background: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca", padding: "9px 18px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
                   Delete
                 </button>
-                <button onClick={() => onEdit(ev)}
-                  style={{ background: "#2563eb", color: "white", border: "none", padding: "9px 18px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
-                  Edit / Reschedule
+                <button onClick={markDone} disabled={busy}
+                  style={{ background: task.status === "done" ? "#f1f5f9" : "#16a34a", color: task.status === "done" ? "#0f172a" : "white", border: "none", padding: "9px 18px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+                  {task.status === "done" ? "Reopen" : "Mark Done"}
                 </button>
               </div>
             </>

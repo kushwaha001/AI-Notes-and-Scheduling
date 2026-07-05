@@ -178,8 +178,14 @@ def get_task(task_id: int):
 =======
 =======
 def get_task(task_id: int, user: CurrentUser = Depends(current_user)):
+<<<<<<< HEAD
 >>>>>>> 3f5068ce881006c02bfba08e3a519f0324183c1b
     """FR-22 — single task detail."""
+=======
+    """FR-22 — single task detail with its source documents, the AI-parsed
+    extraction fields that produced it, and the audit history (mirrors the event
+    detail so the task popup can show the same information)."""
+>>>>>>> d0a6006dc5b0b6eb55723fa96e1b8506554ae1fc
     conn = get_db()
     cur = conn.cursor()
     try:
@@ -190,8 +196,53 @@ def get_task(task_id: int, user: CurrentUser = Depends(current_user)):
         task = cur.fetchone()
         if not task:
             raise HTTPException(404, "Task not found.")
+<<<<<<< HEAD
         return {"task": task}
 >>>>>>> 162d4fa688f7facfdeedcef9f7f595a90b1d5e55
+=======
+
+        # Linked source documents (FR-26/FR-27)
+        cur.execute("""
+            SELECT d.id, d.filename, d.file_type, d.classification,
+                   d.full_text, d.uploaded_at
+            FROM documents d
+            JOIN linked_documents ld
+                ON ld.source_type = 'document' AND ld.source_id = d.id
+            WHERE ld.entity_type = 'task' AND ld.entity_id = %s
+        """, (task_id,))
+        docs = cur.fetchall()
+
+        # AI-parsed extraction fields from those source documents (FR-8, FR-10)
+        extractions = []
+        if docs:
+            doc_ids = [d["id"] for d in docs]
+            cur.execute("""
+                SELECT subject, event_date, event_time, venue, attendees,
+                       ref_number, deadline, reply_by, reply_by_overdue,
+                       meeting_date_flag, field_confidence, model_name,
+                       item_type, status, extracted_at
+                FROM extractions
+                WHERE source_type = 'document' AND source_id = ANY(%s)
+                ORDER BY extracted_at DESC
+            """, (doc_ids,))
+            extractions = cur.fetchall()
+
+        # Audit history for this task (FR-28)
+        cur.execute("""
+            SELECT action, detail, created_at
+            FROM audit_log
+            WHERE entity_type = 'task' AND entity_id = %s
+            ORDER BY created_at DESC
+        """, (task_id,))
+        history = cur.fetchall()
+
+        return {
+            "task": task,
+            "source_documents": docs,
+            "extractions": extractions,
+            "history": history,
+        }
+>>>>>>> d0a6006dc5b0b6eb55723fa96e1b8506554ae1fc
     finally:
         cur.close()
         conn.close()

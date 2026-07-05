@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { checkServices, getQueue, getAuditLog, createBackup, getLastBackup, getSystemStatus } from "../services/api";
+import { fmtDateTime, IST_TZ } from "../components/DateInput";
 
 function Meter({ label, pct, detail }) {
   const p = Math.max(0, Math.min(100, pct ?? 0));
@@ -21,7 +22,7 @@ function Meter({ label, pct, detail }) {
 
 function fmtWhen(iso) {
   if (!iso) return "never";
-  return new Date(iso).toLocaleString();
+  return fmtDateTime(iso);   // IST
 }
 
 const STATUS_COLOR = {
@@ -42,6 +43,9 @@ function ServiceBadge({ name, status }) {
       <div>
         <p style={{ margin: 0, fontWeight: 700, fontSize: "15px", textTransform: "capitalize" }}>{name}</p>
         <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "12px" }}>
+          {name === "llm" && "LLM inference (vLLM / Ollama)"}
+          {name === "embeddings" && "Embedding model (semantic search)"}
+          {name === "docling" && "Document parsing / OCR"}
           {name === "ollama" && "Local LLM inference"}
           {name === "qdrant" && "Vector search DB"}
           {name === "redis"  && "Semantic cache"}
@@ -85,7 +89,7 @@ export default function SystemStatusPage() {
       if (a.status   === "fulfilled") setAudit(a.value);
       if (b.status   === "fulfilled") setBackup(b.value);
       if (s.status   === "fulfilled") setSys(s.value);
-      setLastRefresh(new Date().toLocaleTimeString());
+      setLastRefresh(new Date().toLocaleTimeString("en-GB", { timeZone: IST_TZ }));
     } finally {
       setLoading(false);
     }
@@ -266,7 +270,7 @@ export default function SystemStatusPage() {
                 {entry.detail ? ` — ${entry.detail}` : ""}
               </span>
               <span style={{ color: "#94a3b8", fontSize: "12px", whiteSpace: "nowrap", marginLeft: "16px" }}>
-                {new Date(entry.created_at).toLocaleString()}
+                {fmtDateTime(entry.created_at)}
               </span>
             </div>
           ))

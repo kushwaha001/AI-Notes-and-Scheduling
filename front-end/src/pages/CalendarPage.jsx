@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import CalendarContainer from "../components/CalendarContainer";
 import EventDetailModal from "../components/EventDetailModal";
+import TaskDetailModal from "../components/TaskDetailModal";
 import DateInput, { fmtDate, toApiDate } from "../components/DateInput";
 import { motion } from "framer-motion";
 import { createEvent, getEvents, deleteEvent, updateEvent, getTasks, createTask } from "../services/api";
@@ -87,7 +87,6 @@ function YearView({ year, events, tasks, onDayClick }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function CalendarPage() {
-  const navigate = useNavigate();
   // view: month-grid | week | day | year
   const [activeView, setActiveView]   = useState("month-grid");
   const [counts, setCounts]           = useState(null);       // { events, tasks }
@@ -120,8 +119,9 @@ export default function CalendarPage() {
   // edit/reschedule
   const [editing, setEditing] = useState(null); // event being edited
 
-  // event detail popup
+  // event / task detail popups
   const [detailEventId, setDetailEventId] = useState(null);
+  const [detailTaskId, setDetailTaskId]   = useState(null);
 
   // delete confirmation modal
   const [deleteTarget, setDeleteTarget] = useState(null); // { id, title, isRecurring }
@@ -249,11 +249,11 @@ export default function CalendarPage() {
     setSelectedDayEvents({ date: dateStr, events: evs, tasks: tks });
   }
 
-  // Clicking an item in the calendar: events open the detail popup; tasks go to Tasks
+  // Clicking an item in the calendar opens the matching detail popup
   function handleEventClick(calendarEvent) {
     const id = String(calendarEvent?.id || "");
     if (id.startsWith("event-")) setDetailEventId(Number(id.slice(6)));
-    else if (id.startsWith("task-")) navigate("/tasks");
+    else if (id.startsWith("task-")) setDetailTaskId(Number(id.slice(5)));
   }
 
   const now = new Date();
@@ -604,9 +604,9 @@ export default function CalendarPage() {
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                   }}>
                     <span style={{ fontWeight: 600, fontSize: "14px" }}>📋 {t.title}</span>
-                    <button onClick={() => navigate("/tasks")}
+                    <button onClick={() => setDetailTaskId(t.id)}
                       style={{ background: "transparent", color: "#16a34a", border: "1px solid #16a34a", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
-                      Open
+                      Details
                     </button>
                   </div>
                 ))}
@@ -783,6 +783,15 @@ export default function CalendarPage() {
           onClose={() => setDetailEventId(null)}
           onEdit={(ev) => { setDetailEventId(null); startEdit(ev); }}
           onDelete={(id) => { setDetailEventId(null); handleDelete(id); }}
+        />
+      )}
+
+      {/* Task detail popup — mirrors the event popup, with notes + source docs */}
+      {detailTaskId != null && (
+        <TaskDetailModal
+          taskId={detailTaskId}
+          onClose={() => setDetailTaskId(null)}
+          onChanged={() => setRefreshKey((k) => k + 1)}
         />
       )}
     </>

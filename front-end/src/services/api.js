@@ -71,6 +71,8 @@ export const getTasks = (params = {}) => {
 export const getOpenTasks = () =>
   req("GET", "/tasks/open").then((r) => r.tasks || []);
 
+export const getTask = (id) => req("GET", `/tasks/${id}`);
+
 export const createTask = (data) => req("POST", "/tasks/manual", data);
 export const updateTask = (id, data) => req("PATCH", `/tasks/${id}`, data);
 export const deleteTask = (id) => req("DELETE", `/tasks/${id}`);
@@ -155,6 +157,9 @@ export const voiceExtract = (transcript) => req("POST", "/voice/extract", { tran
 export const getNotes      = () => req("GET", "/notes").then((r) => r.notes || []);
 export const getNote       = (id) => req("GET", `/notes/${id}`);
 export const createNote    = (data) => req("POST", "/notes", data);
+// Notes attached to a specific event/task (shown in the detail popups)
+export const getNotesFor   = (entityType, id) =>
+  req("GET", `/notes/for/${entityType}/${id}`).then((r) => r.notes || []);
 export const updateNote    = (id, data) => req("PUT", `/notes/${id}`, data);
 export const deleteNote    = (id) => req("DELETE", `/notes/${id}`);
 export const scheduleNote  = (id) => req("POST", `/notes/${id}/schedule`);

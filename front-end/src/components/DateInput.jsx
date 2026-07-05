@@ -10,13 +10,52 @@ import { useState, useEffect } from "react";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-/** "2026-06-24" (or ISO datetime) → "24/06/2026" */
+// All app timestamps are shown in India Standard Time (UTC+5:30), regardless of
+// the machine's own clock/locale. Backend TIMESTAMP columns are naive (no zone)
+// and are stored as UTC, so a naive value is treated as UTC before converting.
+export const IST_TZ = "Asia/Kolkata";
+
+/** Parse a backend timestamp, treating a naive "…T…" value as UTC. Pure dates
+ *  ("YYYY-MM-DD") and zoned values are left as-is. Returns a Date or null. */
+function parseTs(ts) {
+  if (!ts) return null;
+  let s = String(ts);
+  // Naive datetime (has a time part but no zone marker) → it's UTC, tag it.
+  if (s.includes("T") && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) s += "Z";
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** "2026-06-24" or ISO datetime → "24/06/2026" (date rendered in IST). A pure
+ *  date has no zone, so it is shown verbatim — no shifting a day forward/back. */
 export function fmtDate(iso) {
   if (!iso) return "—";
-  const raw = String(iso).split("T")[0];
-  const [y, m, d] = raw.split("-");
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
+  const s = String(iso);
+  if (!s.includes("T")) {                     // pure date — no timezone math
+    const [y, m, d] = s.split("-");
+    if (!y || !m || !d) return iso;
+    return `${d}/${m}/${y}`;
+  }
+  const dt = parseTs(s);                       // timestamp — render the IST date
+  if (!dt) return iso;
+  return dt.toLocaleDateString("en-GB", { timeZone: IST_TZ, day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/** Timestamp → "24 Jun 2026, 15:30" in IST. Use for created_at/updated_at etc. */
+export function fmtDateTime(ts) {
+  const d = parseTs(ts);
+  if (!d) return "—";
+  return d.toLocaleString("en-GB", {
+    timeZone: IST_TZ, day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+/** Timestamp → "15:30" in IST (time only). */
+export function fmtTime(ts) {
+  const d = parseTs(ts);
+  if (!d) return "—";
+  return d.toLocaleTimeString("en-GB", { timeZone: IST_TZ, hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /** Value to send to the backend (already "YYYY-MM-DD"). */

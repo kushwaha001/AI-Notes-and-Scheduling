@@ -268,6 +268,15 @@ CREATE TABLE IF NOT EXISTS soft_links (
 );
 CREATE INDEX IF NOT EXISTS idx_soft_links_a ON soft_links(a_kind, a_id);
 CREATE INDEX IF NOT EXISTS idx_soft_links_b ON soft_links(b_kind, b_id);
+
+-- Notes can be attached to a calendar event or a task (added from the calendar
+-- detail popups). NULL for a standalone note. Shown with a badge on the Notes
+-- page and listed inside the event/task detail modal.
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS linked_entity_type TEXT
+    CHECK (linked_entity_type IN ('event','task'));
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS linked_entity_id INT;
+CREATE INDEX IF NOT EXISTS idx_notes_linked_entity
+    ON notes(linked_entity_type, linked_entity_id);
 """
 
 

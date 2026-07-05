@@ -1,9 +1,9 @@
 """
-FR-8/FR-10/FR-11 — Structured field extraction with a local model via Ollama.
+FR-8/FR-10/FR-11 — Structured field extraction via an OpenAI-compatible LLM.
 
-Takes the document text (from Docling) and asks the local model (default
-gemma3:4b, configurable via OLLAMA_MODEL) to return structured JSON fields with
-per-field confidence. Then applies date validation:
+Takes the document text (from Docling) and asks the configured model (vLLM /
+Ollama, see api.ai.llm) to return structured JSON fields with per-field
+confidence. Then applies date validation:
   * a meeting date in the past is flagged (meeting_date_flag) — implausible
   * a reply-by date in the past is valid but flagged overdue (reply_by_overdue)
   * unreadable / missing fields are left null — never invented (FR-11)
@@ -13,9 +13,8 @@ import json
 import logging
 from datetime import datetime, date
 
-import httpx
-
-from api.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_KEEP_ALIVE
+from api.config import LLM_MODEL
+from api.ai.llm import generate_json, resolve_model
 
 log = logging.getLogger(__name__)
 
@@ -55,42 +54,12 @@ DOCUMENT:
 """
 
 
-def ollama_available() -> bool:
+def _model_label() -> str:
+    """The model id to record on the extraction row (best-effort)."""
     try:
-        r = httpx.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
-        return r.status_code == 200
+        return resolve_model()
     except Exception:
-        return False
-
-
-def model_available() -> bool:
-    """True only if the configured OLLAMA_MODEL has actually been pulled."""
-    try:
-        r = httpx.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
-        names = [m.get("name", "") for m in r.json().get("models", [])]
-        base = OLLAMA_MODEL.split(":")[0]
-        return any(n == OLLAMA_MODEL or n.split(":")[0] == base for n in names)
-    except Exception:
-        return False
-
-
-def _ollama_generate(prompt: str) -> str:
-    r = httpx.post(
-        f"{OLLAMA_HOST}/api/generate",
-        json={
-            "model": OLLAMA_MODEL,
-            "prompt": prompt,
-            "format": "json",
-            "stream": False,
-            "keep_alive": OLLAMA_KEEP_ALIVE,   # keep model resident → no cold start
-            # temperature 0 = deterministic; num_predict caps output (the JSON is
-            # small) so the model can't run on generating tokens needlessly.
-            "options": {"temperature": 0, "num_predict": 512},
-        },
-        timeout=300,
-    )
-    r.raise_for_status()
-    return r.json().get("response", "")
+        return LLM_MODEL or "llm"
 
 
 def _parse_date(value):
@@ -135,12 +104,12 @@ def _safe_json(raw: str) -> dict:
 def extract_fields(text: str) -> dict:
     """Run the model and return a normalised extraction dict ready for the DB."""
     prompt = _PROMPT.format(text=text[:12000], today=date.today().isoformat())
-    raw = _ollama_generate(prompt)
+    raw = generate_json(prompt)
     data = _safe_json(raw)
     if data is None:
         # one repair attempt — re-prompt for valid JSON only
         log.warning("Model returned non-JSON; retrying once.")
-        raw = _ollama_generate(prompt + "\n\nReturn ONLY valid JSON, nothing else.")
+        raw = generate_json(prompt + "\n\nReturn ONLY valid JSON, nothing else.")
         data = _safe_json(raw) or {}
 
     conf = data.get("field_confidence") or {}
@@ -164,5 +133,5 @@ def extract_fields(text: str) -> dict:
         "reply_by_overdue":  bool(reply_by and reply_by < today),
         "item_type":        "task" if data.get("item_type") == "task" else "event",
         "field_confidence": {k: float(conf.get(k, 0) or 0) for k in FIELDS},
-        "model_name":       OLLAMA_MODEL,
+        "model_name":       _model_label(),
     }
