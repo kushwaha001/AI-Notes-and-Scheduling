@@ -1,0 +1,23 @@
+# ── AI heavy stack (Python 3.11) ─────────────────────────────
+# The EXACT working set is pinned in requirements-lock.txt — install from that
+# offline. These are the headline packages for reference.
+#
+# Where the GPU is used:
+#   • LLM + embeddings (gemma3:4b, bge-m3) -> Ollama (its own CUDA runtime)
+#   • Whisper transcription              -> faster-whisper / CTranslate2
+#                                           (via the nvidia-*-cu12 12.8 wheels)
+#   • Document OCR + layout (Docling/EasyOCR) -> torch CUDA 12.8 build (+cu128)
+#
+# torch/torchvision are the cu128 (CUDA 12.8) builds and live on the PyTorch
+# index, not PyPI — note the --index-url below.
+
+# install via:
+#   pip install torch==2.11.0 torchvision==0.26.0 \
+#       --index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+faster-whisper==1.2.1
+
+# CPU-only box (no GPU)? use the plain PyPI builds instead — the app auto-detects
+# and falls back to CPU (OCR just runs slower):
+#   pip install torch==2.12.1 torchvision==0.27.1

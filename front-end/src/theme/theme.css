@@ -1,0 +1,37 @@
+/*
+ * Design tokens — the single source of truth for colour + theme.
+ *
+ * Every surface should read these variables (var(--bg), var(--text), …) rather
+ * than hardcoding hex, so light/dark is one attribute flip on <html>. The palette
+ * is the warm "Claude" scheme: cream canvas, ink text, a single coral accent used
+ * ONLY for primary actions.  Managed by src/theme/ThemeProvider.jsx.
+ */
+
+:root {
+  --bg:#FAF9F5; --surface:#FFFFFF; --surface-2:#F3F1EA;
+  --text:#1F1E1D; --text-2:#575751; --muted:#8A897F;
+  --border:#E7E3DA; --border-2:#DED9CE;
+  --accent:#D97757; --accent-hover:#C25B3A; --accent-soft:#F6E9E2;
+  --warn:#B4791F; --warn-soft:#F7EBD2; --ok:#4F7A52; --ok-soft:#E4EFE1;
+  --danger:#B4321F; --danger-soft:#F7DED2;
+  --shadow:0 1px 2px rgba(30,30,29,.04), 0 8px 24px rgba(30,30,29,.06);
+  --radius:14px; --radius-sm:9px;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg:#262624; --surface:#302F2D; --surface-2:#3A3936;
+  --text:#F5F3EC; --text-2:#C9C7BE; --muted:#918F85;
+  --border:#3E3D39; --border-2:#4A4844;
+  --accent:#E08462; --accent-hover:#EC9678; --accent-soft:#3B322D;
+  --warn:#D6A24A; --warn-soft:#39321F; --ok:#7FA97F; --ok-soft:#2A342A;
+  --danger:#E0755C; --danger-soft:#3B2A26;
+  --shadow:0 1px 2px rgba(0,0,0,.2), 0 10px 30px rgba(0,0,0,.28);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  transition: background .2s ease, color .2s ease;
+}

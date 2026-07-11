@@ -1,0 +1,10 @@
+**/venv
+**/__pycache__
+**/*.pyc
+backend/uploads
+backend/notes
+offline/wheels
+offline/installers
+front-end/node_modules
+front-end/dist
+.git

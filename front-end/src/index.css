@@ -1,0 +1,44 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+body {
+  /* background/colour now come from design tokens (see theme/theme.css) */
+  font-family: Inter, system-ui, sans-serif;
+  cursor: default;           /* plain text shows the normal arrow, not an I-beam */
+}
+
+/* Interactive elements get the hand pointer */
+button,
+a,
+select,
+label,
+[role="button"] {
+  cursor: pointer;
+}
+
+/* Only real text fields show the text (I-beam) cursor */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea {
+  cursor: text;
+}
+
+/* Hide schedule-x's built-in view picker — the page provides its own switcher */
+.sx__view-selection {
+  display: none !important;
+}
+
+/* The month grid sizes to its content and so scales proportionally at every UI
+   zoom. The real "Month showed a day grid at 165%" bug was schedule-x collapsing
+   to its narrow single-day layout once the zoomed layout viewport dropped under
+   its ~700px breakpoint — that's disabled via the isCalendarSmall callback in
+   CalendarContainer, so no fixed height override is needed here. */

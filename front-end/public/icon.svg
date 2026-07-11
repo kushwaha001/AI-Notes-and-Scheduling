@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- CORTEX app icon — the same rounded accent square as the sidebar logo mark,
+       with a white "C" (30px, radius 9 -> scaled to 512, radius 154). The letter
+       stays inside the central safe zone so maskable crops keep it whole. -->
+  <rect width="512" height="512" rx="154" fill="#D97757"/>
+  <path d="M340 180a96 96 0 1 0 0 152" fill="none" stroke="#FFFFFF" stroke-width="54" stroke-linecap="round"/>
+</svg>
