@@ -21,6 +21,19 @@ function Conf({ value }) {
   );
 }
 
+function timeOverlaps(s1, e1, s2, e2) {
+  if (!s1 || !s2) return true; // if either lacks a time, assume conflict to be safe
+  const toMin = (t) => {
+    const p = String(t).split(":");
+    return Number(p[0]) * 60 + Number(p[1]);
+  };
+  const start1 = toMin(s1);
+  const end1 = e1 ? toMin(e1) : start1 + 60;
+  const start2 = toMin(s2);
+  const end2 = e2 ? toMin(e2) : start2 + 60;
+  return start1 < end2 && start2 < end1;
+}
+
 function Labelled({ label, conf, low, children }) {
   return (
     <div style={{ marginBottom: "12px" }}>
@@ -58,6 +71,7 @@ export default function ExtractionReviewModal({ jobId, onClose, onDone }) {
             title     : ex.subject || "",
             event_date: ex.event_date ? String(ex.event_date).split("T")[0] : "",
             event_time: ex.event_time ? String(ex.event_time).slice(0, 5) : "",
+            event_end_time: ex.event_end_time ? String(ex.event_end_time).slice(0, 5) : "",
             venue     : ex.venue || "",
             attendees : ex.attendees || "",
             ref_number: ex.ref_number || "",
@@ -81,15 +95,25 @@ export default function ExtractionReviewModal({ jobId, onClose, onDone }) {
 
   async function handleConfirm(ex) {
     const f = forms[ex.id];
-    if (!f.title) { alert("Title is required."); return; }
+    const dateVal = f.item_type === "event" ? f.event_date : (f.deadline || f.reply_by || f.event_date);
+    
+    if (!f.title?.trim() || !dateVal || !f.event_time || !f.event_end_time) {
+      alert("All fields are mandatory. Please fill in the Title, Date, Start Time, and End Time before confirming.");
+      return;
+    }
 
-    // FR-15 — warn if this event clashes with an existing one on the same date
+    // FR-15 — warn if this event clashes with an existing one on the same date and time range
     if (f.item_type === "event" && f.event_date && !conflict[ex.id]) {
       try {
         const existing = await getEvents();
-        const clash = existing.find((e) => String(e.event_date).split("T")[0] === f.event_date);
+        const clash = existing.find((e) => {
+          const sameDate = String(e.event_date).split("T")[0] === f.event_date;
+          if (!sameDate) return false;
+          return timeOverlaps(f.event_time, f.event_end_time, e.event_time, e.event_end_time);
+        });
         if (clash) {
-          setConflict((c) => ({ ...c, [ex.id]: clash.title }));
+          const timeStr = clash.event_time ? ` at ${clash.event_time.slice(0, 5)}` : "";
+          setConflict((c) => ({ ...c, [ex.id]: `${clash.title}${timeStr}` }));
           return; // require a second click to save anyway
         }
       } catch { /* if the check fails, don't block saving */ }
@@ -104,6 +128,7 @@ export default function ExtractionReviewModal({ jobId, onClose, onDone }) {
         title     : f.title,
         event_date: toApiDate(f.event_date),
         event_time: f.event_time,
+        event_end_time: f.event_end_time,
         venue     : f.venue,
         attendees : f.attendees,
         ref_number: f.ref_number,
@@ -223,9 +248,14 @@ export default function ExtractionReviewModal({ jobId, onClose, onDone }) {
                   <Labelled label="Date" conf={conf.event_date} low={dateLow}>
                     <DateInput value={f.event_date} onChange={(v) => setField(ex.id, "event_date", v)} />
                   </Labelled>
-                  <Labelled label="Time" conf={conf.event_time}>
-                    <input type="time" style={inputStyle} value={f.event_time} onChange={(e) => setField(ex.id, "event_time", e.target.value)} />
-                  </Labelled>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                    <Labelled label="Start Time" conf={conf.event_time}>
+                      <input type="time" style={inputStyle} value={f.event_time} onChange={(e) => setField(ex.id, "event_time", e.target.value)} />
+                    </Labelled>
+                    <Labelled label="End Time" conf={conf.event_end_time}>
+                      <input type="time" style={inputStyle} value={f.event_end_time || ""} onChange={(e) => setField(ex.id, "event_end_time", e.target.value)} />
+                    </Labelled>
+                  </div>
                   <Labelled label="Venue" conf={conf.venue}>
                     <input style={inputStyle} value={f.venue} onChange={(e) => setField(ex.id, "venue", e.target.value)} />
                   </Labelled>

@@ -60,11 +60,15 @@ def _load(device, compute):
 
 def _run(model, file_path):
     # vad_filter trims silence (faster + cleaner); language hint skips detection.
+    # vad_filter is OFF: on some browser webm/opus recordings the Silero VAD
+    # wrongly classified the whole clip as silence and removed ALL audio, yielding
+    # an empty transcript ("whisper looks down"). Transcribing the full clip is far
+    # more reliable; Whisper handles the leading/trailing silence fine.
     segments, info = model.transcribe(
         file_path,
         beam_size=WHISPER_BEAM_SIZE,
         language=WHISPER_LANGUAGE or None,
-        vad_filter=True,
+        vad_filter=False,
     )
     text = " ".join(s.text.strip() for s in segments).strip()
     return text, int(getattr(info, "duration", 0) or 0)

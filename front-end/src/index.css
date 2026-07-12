@@ -12,7 +12,7 @@ body,
 }
 
 body {
-  background: #020617;
+  /* background/colour now come from design tokens (see theme/theme.css) */
   font-family: Inter, system-ui, sans-serif;
   cursor: default;           /* plain text shows the normal arrow, not an I-beam */
 }
@@ -36,3 +36,9 @@ textarea {
 .sx__view-selection {
   display: none !important;
 }
+
+/* The month grid sizes to its content and so scales proportionally at every UI
+   zoom. The real "Month showed a day grid at 165%" bug was schedule-x collapsing
+   to its narrow single-day layout once the zoomed layout viewport dropped under
+   its ~700px breakpoint — that's disabled via the isCalendarSmall callback in
+   CalendarContainer, so no fixed height override is needed here. */

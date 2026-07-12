@@ -16,16 +16,22 @@ const STYLE = {
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
-  const push = useCallback((message, type = "info") => {
-    const id = Math.random().toString(36).slice(2);
-    setToasts((t) => [...t, { id, message, type }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+  const dismiss = useCallback((id) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
+  // opts.action — optional { label, onClick }: renders an accent button that
+  // runs onClick and dismisses the toast. Action toasts linger a bit longer.
+  const push = useCallback((message, type = "info", opts = {}) => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((t) => [...t, { id, message, type, action: opts.action }]);
+    setTimeout(() => dismiss(id), opts.action ? 6000 : 4200);
+  }, [dismiss]);
+
   const api = {
-    success: (m) => push(m, "success"),
-    error:   (m) => push(m, "error"),
-    info:    (m) => push(m, "info"),
+    success: (m, opts) => push(m, "success", opts),
+    error:   (m, opts) => push(m, "error", opts),
+    info:    (m, opts) => push(m, "info", opts),
   };
 
   return (
@@ -48,7 +54,20 @@ export function ToastProvider({ children }) {
                   display: "flex", alignItems: "center", gap: "10px",
                 }}>
                 <span style={{ fontWeight: 700 }}>{s.icon}</span>
-                <span>{t.message}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>{t.message}</span>
+                {t.action && (
+                  <button
+                    onClick={() => { t.action.onClick?.(); dismiss(t.id); }}
+                    style={{
+                      flexShrink: 0, background: "var(--accent)", color: "#fff",
+                      border: "none", padding: "5px 12px", borderRadius: "8px",
+                      cursor: "pointer", fontWeight: 700, fontSize: "13px",
+                      fontFamily: "inherit", transition: "opacity .12s",
+                    }}
+                  >
+                    {t.action.label}
+                  </button>
+                )}
               </motion.div>
             );
           })}

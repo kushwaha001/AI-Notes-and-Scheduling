@@ -1,18 +1,5 @@
 # AI Notes and Scheduling — full stack (Docker alternative for offline deploy).
 # See offline/README.md for the offline save/load procedure.
-#
-# One command brings up everything (db + backend + frontend + Keycloak):
-#   docker compose up -d --build
-#
-# URLs:  frontend http://localhost:5173   backend http://localhost:9000
-#        Keycloak http://localhost:8080   (admin console: admin / admin)
-#
-# Auth is ON here (AUTH_ENABLED=true). The `udaan` realm + `udaan-frontend`
-# client auto-import on Keycloak's first start; create users in the admin
-# console (realm "udaan" -> Users) and assign the `admin` role to anyone who
-# needs the System/Audit/Backup pages. To run single-user (no login), set
-# AUTH_ENABLED to "false" on the backend service and you can drop the keycloak
-# service.
 
 services:
   db:
@@ -31,31 +18,6 @@ services:
       timeout: 5s
       retries: 10
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.1
-    command: ["start-dev", "--import-realm"]
-    environment:
-      # Bootstrap admin — new (KC 26+) and legacy names, for version safety.
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HTTP_PORT: "8080"
-      KC_HOSTNAME_STRICT: "false"   # dev/LAN: derive issuer from the request host
-      KC_HEALTH_ENABLED: "true"
-    volumes:
-      # Realm auto-imports on first start; re-runs skip existing realms.
-      - ./keycloak/udaan-realm.json:/opt/keycloak/data/import/udaan-realm.json:ro
-      - kc_data:/opt/keycloak/data
-    ports:
-      - "8080:8080"
-    healthcheck:
-      # No curl/wget in the image — probe the HTTP port over bash's /dev/tcp.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
   backend:
     build:
       context: .
@@ -66,19 +28,9 @@ services:
       DB_NAME: udaan_db
       DB_USER: postgres
       DB_PASSWORD: "0085"
-      # ── Auth (Keycloak) ──────────────────────────────────────
-      AUTH_ENABLED: "true"
-      # Public URL: what the browser uses AND the token issuer we verify against.
-      KEYCLOAK_URL: http://localhost:8080
-      # Internal URL: how the backend container reaches Keycloak (JWKS fetch).
-      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
-      KEYCLOAK_REALM: udaan
-      KEYCLOAK_CLIENT_ID: udaan-frontend
     depends_on:
       db:
         condition: service_healthy
-      keycloak:
-        condition: service_started
     ports:
       - "9000:9000"
 
@@ -93,4 +45,3 @@ services:
 
 volumes:
   pgdata:
-  kc_data:

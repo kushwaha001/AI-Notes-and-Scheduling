@@ -10,6 +10,7 @@ import os
 import logging
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.config import AUDIO_DIR, ALLOWED_AUDIO
@@ -97,9 +98,40 @@ def extract_from_transcript(body: TranscriptPayload,
         "subject":    fields["subject"] or "",
         "event_date": iso(fields["event_date"]),
         "event_time": fields["event_time"] or "",
+        "event_end_time": fields.get("event_end_time") and (str(fields["event_end_time"])[:5]) or "",
         "venue":      fields["venue"] or "",
         "attendees":  fields["attendees"] or "",
         "deadline":   iso(fields["deadline"]),
         "reply_by":   iso(fields["reply_by"]),
         "field_confidence": fields["field_confidence"],
     }
+
+
+@router.get("/audio")
+def list_audio(user: CurrentUser = Depends(current_user)):
+    """List the caller's saved voice notes so a recording can be replayed even if
+    transcription failed at the time (FR-6 — audio is always kept)."""
+    conn = get_db(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, duration, transcript, status, recorded_at FROM audio "
+            "WHERE users_id = %s AND status != 'trashed' ORDER BY recorded_at DESC LIMIT 50",
+            (user["id"],))
+        return {"audio": cur.fetchall()}
+    finally:
+        cur.close(); conn.close()
+
+
+@router.get("/audio/{audio_id}/download")
+def download_audio(audio_id: int, user: CurrentUser = Depends(current_user)):
+    """Stream a saved audio file back (playback / re-check)."""
+    conn = get_db(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT file_path FROM audio WHERE id = %s AND users_id = %s",
+                    (audio_id, user["id"]))
+        row = cur.fetchone()
+    finally:
+        cur.close(); conn.close()
+    if not row or not os.path.exists(row["file_path"]):
+        raise HTTPException(404, "Audio not found.")
+    return FileResponse(row["file_path"])

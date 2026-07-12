@@ -24,6 +24,8 @@ from api.routes import (
     dashboard, audit, notes,
     trash, timeline, ask, backup,
     system, reminders, links, auth,
+    attention, connections, graph, preview,
+    settings, digest,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +46,15 @@ async def lifespan(app: FastAPI):
         auto_backup_if_due()
     except Exception as exc:
         log.warning("Startup auto-backup skipped: %s", exc)
+    # Open the (single-accessor) embedded Qdrant client once, up front — closes
+    # the first-request race window entirely and surfaces a locked store in the
+    # startup log instead of as silently-skipped indexing later.
+    try:
+        from api.ai.vectorstore import get_client
+        get_client()
+        log.info("Vector store client initialised.")
+    except Exception as exc:
+        log.warning("Vector store init failed (semantic indexing degraded): %s", exc)
     yield
 
 
@@ -81,6 +92,12 @@ app.include_router(system.router)
 app.include_router(reminders.router)
 app.include_router(links.router)
 app.include_router(auth.router)
+app.include_router(attention.router)
+app.include_router(connections.router)
+app.include_router(graph.router)
+app.include_router(preview.router)
+app.include_router(settings.router)
+app.include_router(digest.router)
 
 
 # ── SYSTEM ENDPOINTS ──────────────────────────────────────────

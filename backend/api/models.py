@@ -6,6 +6,7 @@ class ManualEvent(BaseModel):
     title      : str
     event_date : str                        # DD MMM YYYY — NFR-5
     event_time : Optional[str] = ""
+    event_end_time : Optional[str] = ""      # end of a time range, else blank
     venue      : Optional[str] = ""
     attendees  : Optional[str] = ""
     ref_number : Optional[str] = ""
@@ -28,6 +29,7 @@ class ConfirmItem(BaseModel):
     title      : str
     event_date : Optional[str] = ""
     event_time : Optional[str] = ""
+    event_end_time : Optional[str] = ""
     venue      : Optional[str] = ""
     attendees  : Optional[str] = ""
     ref_number : Optional[str] = ""
@@ -56,14 +58,21 @@ class SearchRequest(BaseModel):
 class ManualTask(BaseModel):
     title    : str
     due_date : Optional[str] = ""
+    start_time: Optional[str] = ""
+    end_time : Optional[str] = ""
     priority : Optional[str] = "Medium"
     category : Optional[str] = "General"
+    # Optional recurrence — spawns repeated task instances (no series table).
+    recurrence : Optional[str] = None    # daily | weekly | monthly
+    interval   : Optional[int] = 1
+    count      : Optional[int] = None    # number of occurrences (including the first)
 
 
 class EventUpdate(BaseModel):
     title      : Optional[str] = None
     event_date : Optional[str] = None
     event_time : Optional[str] = None
+    event_end_time : Optional[str] = None
     venue      : Optional[str] = None
     attendees  : Optional[str] = None
     priority   : Optional[str] = None
@@ -74,6 +83,8 @@ class EventUpdate(BaseModel):
 class TaskUpdate(BaseModel):
     title    : Optional[str] = None
     due_date : Optional[str] = None
+    start_time: Optional[str] = None
+    end_time : Optional[str] = None
     status   : Optional[str] = None
     priority : Optional[str] = None
     category : Optional[str] = None

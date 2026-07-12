@@ -73,34 +73,71 @@ def _route_question(question: str) -> dict:
 
 
 def _answer_schedule(question: str, route: dict, user_id: int) -> dict:
-    """FR-29 — answer schedule questions exactly from the events database."""
+    """FR-29 — answer schedule questions exactly from the database (never AI
+    recall). Merges calendar MEETINGS (event_date) and task DEADLINES / reply-by
+    dates (due_date), presented in CHRONOLOGICAL order. Recognises "what's
+    overdue?" and lists only open items whose date has already passed."""
+    today = date.today()
+    ql = question.lower()
+    overdue = any(w in ql for w in ("overdue", "over due", "past due", "past-due",
+                                    "late", "missed", "behind"))
     frm = route.get("from_date")
     to  = route.get("to_date")
+
     conn = get_db(); cur = conn.cursor()
     try:
-        q = ("SELECT title, event_date, event_time, venue FROM events "
-             "WHERE status != 'trashed' AND users_id = %s")
-        params = [user_id]
-        if frm:
-            q += " AND event_date >= %s"; params.append(frm)
-        if to:
-            q += " AND event_date <= %s"; params.append(to)
-        q += " ORDER BY event_date, event_time NULLS LAST"
-        cur.execute(q, params)
-        rows = cur.fetchall()
+        if overdue:
+            # Overdue = open task deadlines / reply-bys whose date is before today.
+            cur.execute(
+                "SELECT title, due_date, is_reply_task, status FROM tasks "
+                "WHERE status = 'open' AND due_date IS NOT NULL AND due_date < %s "
+                "AND users_id = %s ORDER BY due_date", (today, user_id))
+            events, tasks = [], cur.fetchall()
+        else:
+            eq = ("SELECT title, event_date, event_time, venue FROM events "
+                  "WHERE status != 'trashed' AND users_id = %s")
+            ep = [user_id]
+            if frm: eq += " AND event_date >= %s"; ep.append(frm)
+            if to:  eq += " AND event_date <= %s"; ep.append(to)
+            cur.execute(eq, ep); events = cur.fetchall()
+
+            tq = ("SELECT title, due_date, is_reply_task, status FROM tasks "
+                  "WHERE status != 'trashed' AND due_date IS NOT NULL AND users_id = %s")
+            tp = [user_id]
+            if frm: tq += " AND due_date >= %s"; tp.append(frm)
+            if to:  tq += " AND due_date <= %s"; tp.append(to)
+            cur.execute(tq, tp); tasks = cur.fetchall()
     finally:
         cur.close(); conn.close()
 
-    if not rows:
-        ans = "You have no events scheduled in that period."
+    def dmy(d):
+        s = str(d).split("-")
+        return f"{s[2]}/{s[1]}/{s[0]}" if len(s) == 3 else str(d)
+
+    # Build one list keyed by (date, time) so everything reads in date order.
+    items = []
+    for r in events:
+        tstr = str(r["event_time"])[:5] if r["event_time"] else None
+        t = f" at {tstr}" if tstr else ""
+        v = f" ({r['venue']})" if r["venue"] else ""
+        items.append((str(r["event_date"]), tstr or "00:00",
+                      f"- 📅 {dmy(r['event_date'])}{t} — {r['title']}{v}"))
+    for r in tasks:
+        kind = "reply due" if r["is_reply_task"] else "due"
+        flag = " ⚠ overdue" if (str(r["due_date"]) < today.isoformat()
+                                and r["status"] == "open") else ""
+        done = " (done)" if r["status"] == "done" else ""
+        items.append((str(r["due_date"]), "23:59",
+                      f"- ✅ {dmy(r['due_date'])} — {r['title']} ({kind}){flag}{done}"))
+
+    items.sort(key=lambda x: (x[0], x[1]))     # chronological
+
+    if not items:
+        ans = ("Nothing overdue — you're all caught up." if overdue
+               else "Nothing scheduled or due in that period — no meetings and no task deadlines.")
     else:
-        def fmt(r):
-            d = str(r["event_date"]).split("-")
-            ds = f"{d[2]}/{d[1]}/{d[0]}" if len(d) == 3 else str(r["event_date"])
-            t = f" at {str(r['event_time'])[:5]}" if r["event_time"] else ""
-            v = f" ({r['venue']})" if r["venue"] else ""
-            return f"- {r['title']} on {ds}{t}{v}"
-        ans = "Here is what's on:\n" + "\n".join(fmt(r) for r in rows)
+        head = "Overdue items:" if overdue else "Here's what's on, in date order:"
+        ans = head + "\n" + "\n".join(x[2] for x in items)
 
     return {"answer": ans, "sources": [], "query": question, "mode": "schedule"}
 

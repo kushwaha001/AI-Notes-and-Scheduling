@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     users_id       INT  NOT NULL REFERENCES users(id),
     title          TEXT NOT NULL,
     due_date       DATE,
+    start_time     TIME,
+    end_time       TIME,
     is_reply_task  BOOLEAN NOT NULL DEFAULT FALSE,
     classification TEXT,
     source         TEXT NOT NULL DEFAULT 'ai'
@@ -139,6 +141,15 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_owner_due ON tasks(users_id, due_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_reply_due ON tasks(is_reply_task, due_date) WHERE is_reply_task = TRUE;
+-- Task priority (Low / Medium / High / Critical); nullable, defaults Medium.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'Medium';
+-- Event priority (Low / Medium / High / Critical); nullable, defaults Medium.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'Medium';
+-- Event/extraction END time (for meetings given as a time range, e.g. 1430-1600).
+ALTER TABLE events      ADD COLUMN IF NOT EXISTS event_end_time TIME;
+ALTER TABLE extractions ADD COLUMN IF NOT EXISTS event_end_time TIME;
+ALTER TABLE tasks       ADD COLUMN IF NOT EXISTS start_time TIME;
+ALTER TABLE tasks       ADD COLUMN IF NOT EXISTS end_time TIME;
 
 CREATE TABLE IF NOT EXISTS notes (
     id                 SERIAL PRIMARY KEY,
@@ -215,7 +226,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action      TEXT NOT NULL
                     CHECK (action IN ('uploaded','extracted','confirmed','dismissed',
                                       'edited','rescheduled','trashed','restored',
-                                      'purged','manual_entry','status_changed')),
+                                      'purged','manual_entry','status_changed','escalated')),
     entity_type TEXT NOT NULL CHECK (entity_type IN ('document','audio','event','task','note')),
     entity_id   INT  NOT NULL,
     detail      TEXT,
@@ -251,6 +262,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_user_hash
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS ref_number TEXT;
 CREATE INDEX IF NOT EXISTS idx_documents_ref ON documents(ref_number);
 
+-- Correspondence lifecycle: where a letter sits in its handling.
+--   open    = received, not yet actioned/replied
+--   replied = a reply has been sent (auto-set when its reply task is completed)
+--   closed  = fully dealt with
+-- Kept separate from the processing `status`; values validated in the API.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS letter_status TEXT NOT NULL DEFAULT 'open';
+CREATE INDEX IF NOT EXISTS idx_documents_letter_status ON documents(letter_status);
+
 -- FR-25: AI-suggested "soft" links between content items (notes/documents).
 -- Never auto-applied — the user accepts or rejects each suggestion.
 CREATE TABLE IF NOT EXISTS soft_links (
@@ -277,6 +296,19 @@ ALTER TABLE notes ADD COLUMN IF NOT EXISTS linked_entity_type TEXT
 ALTER TABLE notes ADD COLUMN IF NOT EXISTS linked_entity_id INT;
 CREATE INDEX IF NOT EXISTS idx_notes_linked_entity
     ON notes(linked_entity_type, linked_entity_id);
+
+-- AI auto-summary + tags (local LLM, air-gapped). Best-effort and nullable:
+-- populated on demand, never required, so note-taking works with the LLM offline.
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS ai_summary TEXT;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS ai_tags    TEXT;   -- comma-separated
+
+-- Auto-escalation (digest) logs an 'escalated' action; widen the check on
+-- existing installs, where CREATE TABLE IF NOT EXISTS won't touch the constraint.
+ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check
+    CHECK (action IN ('uploaded','extracted','confirmed','dismissed',
+                      'edited','rescheduled','trashed','restored',
+                      'purged','manual_entry','status_changed','escalated'));
 """
 
 

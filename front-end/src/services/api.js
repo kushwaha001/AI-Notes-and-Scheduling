@@ -43,6 +43,9 @@ export const getMe         = () => req("GET", "/auth/me");
 // ── Dashboard ─────────────────────────────────────────────────
 export const getDashboard = () => req("GET", "/dashboard");
 
+// 'Needs attention' digest — overdue/soon/replies + an AI briefing line.
+export const getAttention = () => req("GET", "/attention");
+
 // ── Events ────────────────────────────────────────────────────
 export const getTodayEvents = () =>
   req("GET", "/events/today").then((r) => r.events || []);
@@ -89,9 +92,51 @@ export const uploadFile = (file) => {
 
 export const deleteDocument = (id) => req("DELETE", `/documents/${id}`);
 export const reextractDocument = (id) => req("POST", `/documents/${id}/reextract`);
+// FR-24/25 — past items related to a document (ref-number + series + semantic)
+export const getRelatedForDoc = (id) =>
+  req("GET", `/documents/${id}/related`).then((r) => r.related || []);
+// Correspondence lifecycle: open | replied | closed
+export const setLetterStatus = (id, status) =>
+  req("PATCH", `/documents/${id}/letter-status`, { status });
+// Connections / backlinks for any item (document | note | event | task)
+export const getConnections = (kind, id) =>
+  req("GET", `/connections/${kind}/${id}`);
+// Reply-draft assistant (local LLM) → { draft, ref_number }
+export const draftReply = (id) => req("POST", `/documents/${id}/draft-reply`);
+// Correspondence register (all letters with ref/status/dates)
+export const getRegister = () =>
+  req("GET", "/documents/register").then((r) => r.register || []);
+// Natural-language quick capture → parsed single item
+export const parseCapture = (text) => req("POST", "/tasks/parse", { text });
+// Knowledge graph: whole-corpus nodes + labeled edges
+export const getGraph = () => req("GET", "/graph");
+// Item preview (summary + key fields + full body) for the click-to-peek panel
+export const getPreview = (kind, id) => req("GET", `/preview/${kind}/${id}`);
 
 // FR-27 — open the original document (returns a URL for <a>/<img>)
 export const documentDownloadUrl = (id) => `${BASE}/documents/${id}/download`;
+
+// ── Letters workspace / reply workflow ──
+// "Replies due" = open letters that carry a reply-by date. Derived from the
+// register (doc id + ref + reply_by all present) rather than /pending-replies,
+// which returns reply TASKS in a 2-day window — a different, narrower thing.
+export const getPendingReplies = () =>
+  req("GET", "/documents/register").then((r) =>
+    (r.register || []).filter((d) => (d.letter_status || "open") === "open" && d.reply_by));
+export const registerCsvUrl    = () => `${BASE}/documents/register.csv`;
+
+// ── Morning brief (daily digest on Today) ──
+export const getDigest = () => req("GET", "/digest");
+
+// ── Settings — runtime LLM / vLLM configuration ──
+export const getLlmSettings  = () => req("GET", "/settings/llm");
+export const saveLlmSettings = (data) => req("PUT", "/settings/llm", data);
+export const testLlmSettings = (data) => req("POST", "/settings/llm/test", data);
+
+// ── Voice — saved recordings (replay even if transcription failed) ──
+export const listAudio        = () => req("GET", "/audio").then((r) => r.audio || []);
+export const audioDownloadUrl = (id) => `${BASE}/audio/${id}/download`;
+
 
 // FR-39 — backups
 export const createBackup  = () => req("POST", "/backup");
@@ -163,6 +208,8 @@ export const getNotesFor   = (entityType, id) =>
 export const updateNote    = (id, data) => req("PUT", `/notes/${id}`, data);
 export const deleteNote    = (id) => req("DELETE", `/notes/${id}`);
 export const scheduleNote  = (id) => req("POST", `/notes/${id}/schedule`);
+// AI auto-summary + tags for a note (local LLM). Returns { summary, tags }.
+export const summarizeNote = (id) => req("POST", `/notes/${id}/summarize`);
 
 // FR-39 — note version history
 export const getNoteVersions = (id) =>

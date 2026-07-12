@@ -5,9 +5,9 @@ import { getTimeline } from "../services/api";
 import { fmtDate } from "../components/DateInput";
 
 const KIND_STYLE = {
-  event: { color: "#2563eb", bg: "#eff6ff", icon: "📅", label: "Event" },
-  task:  { color: "#16a34a", bg: "#f0fdf4", icon: "✓",  label: "Task"  },
-  note:  { color: "#7c3aed", bg: "#faf5ff", icon: "📝", label: "Note"  },
+  event: { color: "var(--accent)", bg: "var(--accent-soft)", icon: "📅", label: "Event" },
+  task:  { color: "var(--ok)", bg: "var(--ok-soft)", icon: "✓",  label: "Task"  },
+  note:  { color: "var(--text-2)", bg: "var(--surface-2)", icon: "📝", label: "Note"  },
 };
 
 const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -65,16 +65,10 @@ export default function TimelinePage() {
 
   return (
     <>
-      <div style={{ marginBottom: "24px" }}>
-        <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
-          Unified Timeline
-        </p>
-        <h1 style={{ margin: 0, fontSize: "42px" }}>Timeline</h1>
-        <p style={{ color: "#64748b", marginTop: "10px" }}>
-          Events, tasks and notes in one chronological view. Repeating events are
-          shown once. Click any item to open its source.
-        </p>
-      </div>
+      <p style={{ color: "var(--muted)", fontSize: 15.5, margin: "0 0 20px" }}>
+        Events, tasks and notes in one chronological view. Repeating events are
+        shown once. Click any item to open its source.
+      </p>
 
       {/* Filters with counts */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "28px", flexWrap: "wrap" }}>
@@ -89,15 +83,15 @@ export default function TimelinePage() {
             onClick={() => setFilter(f.key)}
             style={{
               padding: "8px 18px", borderRadius: "10px", border: "none",
-              background: filter === f.key ? "#2563eb" : "#f1f5f9",
-              color: filter === f.key ? "white" : "#475569",
+              background: filter === f.key ? "var(--accent)" : "var(--surface-2)",
+              color: filter === f.key ? "white" : "var(--text-2)",
               fontWeight: 600, cursor: "pointer", fontSize: "14px",
               display: "flex", alignItems: "center", gap: "8px",
             }}
           >
             {f.label}
             <span style={{
-              background: filter === f.key ? "rgba(255,255,255,0.25)" : "#e2e8f0",
+              background: filter === f.key ? "rgba(255,255,255,0.25)" : "var(--border)",
               color: filter === f.key ? "white" : "#64748b",
               borderRadius: "99px", padding: "1px 8px", fontSize: "12px",
             }}>
@@ -107,10 +101,10 @@ export default function TimelinePage() {
         ))}
       </div>
 
-      {loading && <p style={{ color: "#94a3b8" }}>Loading timeline…</p>}
+      {loading && <p style={{ color: "var(--muted)" }}>Loading timeline…</p>}
       {!loading && filtered.length === 0 && (
-        <div style={{ background: "white", borderRadius: "20px", padding: "60px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
-          <p style={{ color: "#94a3b8", fontSize: "18px" }}>Nothing on the timeline yet.</p>
+        <div style={{ background: "var(--surface)", borderRadius: "20px", padding: "60px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
+          <p style={{ color: "var(--muted)", fontSize: "18px" }}>Nothing on the timeline yet.</p>
         </div>
       )}
 
@@ -122,13 +116,13 @@ export default function TimelinePage() {
             <div style={{
               display: "flex", alignItems: "baseline", gap: "10px",
               marginBottom: "14px", paddingBottom: "8px",
-              borderBottom: "1px solid #e2e8f0",
+              borderBottom: "1px solid var(--border)",
             }}>
-              <h3 style={{ margin: 0, color: "#0f172a", fontSize: "17px", fontWeight: 700 }}>{main}</h3>
-              {sub && <span style={{ color: "#94a3b8", fontSize: "13px" }}>{sub}</span>}
+              <h3 style={{ margin: 0, color: "var(--text)", fontSize: "17px", fontWeight: 700 }}>{main}</h3>
+              {sub && <span style={{ color: "var(--muted)", fontSize: "13px" }}>{sub}</span>}
             </div>
 
-            <div style={{ borderLeft: "2px solid #e2e8f0", paddingLeft: "22px", display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ borderLeft: "2px solid var(--border)", paddingLeft: "22px", display: "flex", flexDirection: "column", gap: "10px" }}>
               {groups[dateKey].map((item) => {
                 const s = KIND_STYLE[item.kind] || KIND_STYLE.note;
                 return (
@@ -137,7 +131,7 @@ export default function TimelinePage() {
                     whileHover={{ x: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.10)" }}
                     onClick={() => goToSource(item)}
                     style={{
-                      background: "white", borderRadius: "14px",
+                      background: "var(--surface)", borderRadius: "14px",
                       padding: "14px 18px", boxShadow: "0 4px 16px rgba(0,0,0,0.05)",
                       cursor: "pointer", position: "relative",
                       display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -149,7 +143,7 @@ export default function TimelinePage() {
                       position: "absolute", left: "-30px", top: "50%", transform: "translateY(-50%)",
                       width: "13px", height: "13px", borderRadius: "50%",
                       background: s.color, border: "3px solid white",
-                      boxShadow: "0 0 0 1px #e2e8f0",
+                      boxShadow: "0 0 0 1px var(--border)",
                     }} />
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
                       <span style={{ fontSize: "18px" }}>{s.icon}</span>
@@ -158,7 +152,7 @@ export default function TimelinePage() {
                           <strong style={{ fontSize: "15px" }}>{item.title}</strong>
                           {item.recurring && (
                             <span style={{
-                              background: "#fef9c3", color: "#854d0e",
+                              background: "var(--warn-soft)", color: "var(--warn)",
                               fontSize: "11px", fontWeight: 600,
                               padding: "1px 8px", borderRadius: "99px",
                             }}>
@@ -167,7 +161,7 @@ export default function TimelinePage() {
                           )}
                           {item.classification && item.classification !== "General" && (
                             <span style={{
-                              background: "#faf5ff", color: "#7c3aed",
+                              background: "var(--surface-2)", color: "var(--text-2)",
                               fontSize: "11px", fontWeight: 600,
                               padding: "1px 8px", borderRadius: "99px",
                             }}>
@@ -176,10 +170,12 @@ export default function TimelinePage() {
                           )}
                         </div>
                         {(item.subtitle || item.time) && (
-                          <p style={{ margin: "3px 0 0", color: "#94a3b8", fontSize: "13px" }}>
+                          <p style={{ margin: "3px 0 0", color: "var(--muted)", fontSize: "13px" }}>
                             {item.subtitle}
                             {item.subtitle && item.time ? " · " : ""}
-                            {item.time ? String(item.time).slice(0, 5) : ""}
+                            {item.time ? (
+                              item.time.slice(0, 5) + (item.end_time ? `–${item.end_time.slice(0, 5)}` : "")
+                            ) : ""}
                           </p>
                         )}
                       </div>

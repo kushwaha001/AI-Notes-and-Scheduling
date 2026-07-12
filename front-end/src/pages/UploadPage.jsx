@@ -1,158 +1,63 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   uploadFile,
   getDocuments,
   deleteDocument,
   getPendingConfirmations,
-  getConfirmation,
   documentDownloadUrl,
   getAuditLog,
-  processQueue,
   checkServices,
   reextractDocument,
-  confirmAllExtractions,
-  dismissAllExtractions,
+  setLetterStatus,
+  draftReply,
+  getRegister,
+  createNote,
 } from "../services/api";
-import { motion, AnimatePresence } from "framer-motion";
 import { fmtDate, fmtDateTime } from "../components/DateInput";
 import { useToast } from "../components/ToastProvider";
+import Connections from "../components/Connections";
+import AiStatusBadge from "../components/AiStatusBadge";
 
-const STATUS_COLOR = {
-  queued: "#f59e0b", processing: "#3b82f6", ready_to_confirm: "#8b5cf6",
-  done: "#22c55e", failed: "#ef4444", trashed: "#94a3b8",
-  waiting: "#f59e0b", awaiting_confirm: "#8b5cf6", cancelled: "#94a3b8",
-  uploading: "#3b82f6", duplicate: "#f59e0b",
+const csvCell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+const esc = (s) => String(s ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+
+// Correspondence lifecycle badge colours.
+const LETTER_CHIP = {
+  open:    { bg: "var(--warn-soft)", fg: "var(--warn)", label: "Open" },
+  replied: { bg: "var(--ok-soft)", fg: "var(--ok)", label: "Replied" },
+  closed:  { bg: "var(--surface-2)", fg: "var(--muted)", label: "Closed" },
 };
 
-// Small inline spinner (framer-motion rotate — no extra CSS framework needed)
-function Spinner({ size = 18, color = "#4f46e5", track = "#c7d2fe" }) {
-  return (
-    <motion.div
-      animate={{ rotate: 360 }}
-      transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
-      style={{
-        width: size, height: size, borderRadius: "50%",
-        border: `2px solid ${track}`, borderTopColor: color, flexShrink: 0,
-      }}
-    />
-  );
+// Map a job/document status to a token-based chip colour.
+function chip(status) {
+  const ok = ["done", "ready_to_confirm", "awaiting_confirm"];
+  const bad = ["failed", "too-large"];
+  if (ok.includes(status)) return { bg: "var(--ok-soft)", fg: "var(--ok)" };
+  if (bad.includes(status)) return { bg: "var(--danger-soft)", fg: "var(--danger)" };
+  return { bg: "var(--warn-soft)", fg: "var(--warn)" }; // queued / uploading / processing / duplicate
 }
 
-// Indeterminate progress bar — we can't know the exact %, so a sweeping bar
-// communicates "working" honestly.
-function ProgressSweep() {
-  return (
-    <div style={{
-      height: 6, borderRadius: 99, background: "#e0e7ff",
-      overflow: "hidden", position: "relative",
-    }}>
-      <motion.div
-        animate={{ x: ["-40%", "260%"] }}
-        transition={{ repeat: Infinity, duration: 1.4, ease: "easeInOut" }}
-        style={{
-          position: "absolute", top: 0, bottom: 0, width: "40%", borderRadius: 99,
-          background: "linear-gradient(90deg,#6366f1,#8b5cf6)",
-        }}
-      />
-    </div>
-  );
-}
-
-// "2026-07-09" -> "09 Jul 2026"; passes other strings through unchanged.
-function prettyDate(d) {
-  if (!d) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d));
-  if (!m) return String(d);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${m[3]} ${months[+m[2] - 1]} ${m[1]}`;
-}
-
-// Average the per-field confidence scores into a single 0–100 figure.
-// Confidence is shown ONLY here, at extraction time (per product decision).
-function overallConfidence(fieldConfidence) {
-  if (!fieldConfidence || typeof fieldConfidence !== "object") return null;
-  const vals = Object.values(fieldConfidence).filter((v) => typeof v === "number");
-  if (vals.length === 0) return null;
-  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  return Math.round(avg * 100);
-}
-
-// A clean read-only summary of one extracted item — what will be added.
-function ExtractionPreview({ ex }) {
-  const isEvent = ex.item_type === "event" && ex.event_date;
-  const conf = overallConfidence(ex.field_confidence);
-  const lowConf = conf != null && conf < 70;
-  const chips = [];
-  if (isEvent) {
-    if (ex.event_date) chips.push(["📅", prettyDate(ex.event_date)]);
-    if (ex.event_time) chips.push(["🕐", String(ex.event_time).slice(0, 5)]);
-    if (ex.venue)      chips.push(["📍", ex.venue]);
-    if (ex.attendees)  chips.push(["👥", ex.attendees]);
-    if (ex.reply_by)   chips.push(["↩️", `Reply by ${prettyDate(ex.reply_by)}`]);
-  } else {
-    const due = ex.deadline || ex.reply_by || ex.event_date;
-    if (due) chips.push(["📅", `Due ${prettyDate(due)}`]);
-  }
-
-  const accent = isEvent ? "#2563eb" : "#9333ea";
-  return (
-    <div style={{
-      background: "white", border: "1px solid #e2e8f0", borderLeft: `4px solid ${accent}`,
-      borderRadius: "10px", padding: "12px 14px",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: chips.length ? "8px" : 0 }}>
-        <span style={{
-          background: `${accent}15`, color: accent, fontWeight: 700, fontSize: "11px",
-          padding: "2px 9px", borderRadius: "99px", textTransform: "uppercase", letterSpacing: "0.03em",
-        }}>
-          {isEvent ? "Event" : "Task"}
-        </span>
-        <strong style={{ fontSize: "14px" }}>{ex.subject || "Untitled"}</strong>
-        {conf != null && (
-          <span
-            title="AI confidence for this extraction (shown at extraction time only)"
-            style={{
-              marginLeft: "auto", fontSize: "11px", fontWeight: 700,
-              padding: "2px 9px", borderRadius: "99px",
-              background: lowConf ? "#fef2f2" : "#f0fdf4",
-              color: lowConf ? "#dc2626" : "#16a34a",
-            }}>
-            {conf}% confident{lowConf ? " · review" : ""}
-          </span>
-        )}
-      </div>
-      {chips.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
-          {chips.map(([icon, text], i) => (
-            <span key={i} style={{
-              display: "inline-flex", alignItems: "center", gap: "5px",
-              background: "#f1f5f9", color: "#334155", fontSize: "12.5px",
-              padding: "3px 10px", borderRadius: "8px",
-            }}>
-              <span>{icon}</span>{text}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+const cardStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius)",
+  boxShadow: "var(--shadow)",
+};
 
 export default function UploadPage() {
   const toast = useToast();
 
-  // FR-2 batch upload — queue of files with per-file status
-  const [queue, setQueue]       = useState([]); // [{ name, size, status, message }]
+  const [queue, setQueue] = useState([]); // [{ file, name, size, status, message }]
   const [uploading, setUploading] = useState(false);
-
   const [documents, setDocuments] = useState([]);
-  const [pending, setPending]     = useState([]);
-  const [details, setDetails]     = useState({}); // { job_id: [extraction, ...] } — preview
-  const [history, setHistory]     = useState(null); // { doc, entries }
-  const [aiStatus, setAiStatus]   = useState(null); // "ready" | "offline"
-  const [processing, setProcessing] = useState(false);
-  const [addingJob, setAddingJob] = useState(null); // job_id being added to calendar
+  const [pending, setPending] = useState([]);
+  const [aiStatus, setAiStatus] = useState(null);
+  const [history, setHistory] = useState(null);
+  const [awaitingOnly, setAwaitingOnly] = useState(false);
+  const [connDoc, setConnDoc] = useState(null); // document whose connections modal is open
+  const [draft, setDraft] = useState(null);     // { docId, filename, text, loading }
+  const [register, setRegister] = useState(null); // rows array, or null (closed)
 
   function loadData() {
     getDocuments().then(setDocuments).catch(() => {});
@@ -161,42 +66,16 @@ export default function UploadPage() {
   }
   useEffect(() => { loadData(); }, []);
 
-  // Documents still being read by the AI (parse + extract). These sit in the
-  // Processing section until extraction finishes and they move to "Ready".
   const inProgress = documents.filter(
-    (d) => d.status === "queued" || d.status === "processing" ||
-           d.queue_status === "waiting" || d.queue_status === "processing"
+    (d) => ["queued", "processing"].includes(d.status) ||
+           ["waiting", "processing"].includes(d.queue_status)
   );
 
-  // poll while anything is processing OR while uploads are mid-flight, so the
-  // Processing → Ready transition appears automatically without a refresh.
   useEffect(() => {
     if (inProgress.length === 0) return;
-    const id = setInterval(loadData, 4000);
+    const id = setInterval(loadData, 8000);
     return () => clearInterval(id);
   }, [inProgress.length]);
-
-  // Pull the extracted fields for each ready document so the user can SEE what
-  // will be added before clicking (a clean preview — no confidence/edit review).
-  useEffect(() => {
-    pending.forEach((p) => {
-      getConfirmation(p.job_id)
-        .then((r) => setDetails((d) => ({ ...d, [p.job_id]: r.extractions || [] })))
-        .catch(() => {});
-    });
-  }, [pending]);
-
-  async function handleProcessQueue() {
-    setProcessing(true);
-    try {
-      await processQueue();
-      setTimeout(loadData, 1500);
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setProcessing(false);
-    }
-  }
 
   function onFilesPicked(fileList) {
     const files = Array.from(fileList);
@@ -204,66 +83,45 @@ export default function UploadPage() {
       toast.error("Maximum 20 files per batch.");
       return;
     }
-    setQueue(files.map((f) => ({ file: f, name: f.name, size: f.size, status: "queued", message: "" })));
+    // Detect oversized files up-front (before any upload/extraction) so the user
+    // isn't left waiting on a huge file that the server would reject at 50 MB.
+    const MAX_BYTES = 50 * 1024 * 1024;
+    const mapped = files.map((f) => {
+      const tooBig = f.size > MAX_BYTES;
+      return {
+        file: f, name: f.name, size: f.size,
+        status: tooBig ? "too-large" : "queued",
+        message: tooBig ? `Over 50 MB (${(f.size / 1048576).toFixed(1)} MB) — remove or use a smaller copy.` : "",
+      };
+    });
+    setQueue(mapped);
+    if (mapped.some((m) => m.status === "too-large"))
+      toast.error("Some files are over the 50 MB limit and won't be uploaded.");
   }
 
-  // FR-2 / NFR-6 — process the batch sequentially (single pipeline)
+  function removeFromQueue(i) {
+    setQueue((q) => q.filter((_, idx) => idx !== i));
+  }
+
   async function handleBatchUpload() {
     setUploading(true);
     for (let i = 0; i < queue.length; i++) {
-      if (queue[i].status === "done") continue;
-      setQueue((q) => q.map((item, idx) => idx === i ? { ...item, status: "uploading" } : item));
+      if (queue[i].status === "done" || queue[i].status === "too-large") continue;
+      setQueue((q) => q.map((item, idx) => (idx === i ? { ...item, status: "uploading" } : item)));
       try {
         const res = await uploadFile(queue[i].file);
         setQueue((q) => q.map((item, idx) =>
           idx === i ? { ...item, status: "done", message: `Job #${res.job_id}` } : item));
       } catch (e) {
         const dup = String(e.message).toLowerCase().includes("duplicate");
+        if (dup) toast.info(`"${queue[i].name}" is already in your documents — skipped, not uploaded again.`);
         setQueue((q) => q.map((item, idx) =>
           idx === i ? { ...item, status: dup ? "duplicate" : "failed", message: e.message } : item));
       }
     }
     setUploading(false);
+    toast.success("Uploaded. Review what the AI found in your Inbox.");
     loadData();
-  }
-
-  // One-click: add EVERY extracted item from this document to the calendar/tasks.
-  async function handleAddToCalendar(item) {
-    setAddingJob(item.job_id);
-    try {
-      const res = await confirmAllExtractions(item.job_id);
-      const bits = [];
-      if (res.events_added) bits.push(`${res.events_added} event${res.events_added > 1 ? "s" : ""}`);
-      if (res.tasks_added) bits.push(`${res.tasks_added} task${res.tasks_added > 1 ? "s" : ""}`);
-      const skipped = res.events_skipped
-        ? ` (${res.events_skipped} duplicate${res.events_skipped > 1 ? "s" : ""} skipped)`
-        : "";
-      if (res.total > 0) {
-        toast.success(`Added ${bits.join(" + ")} to your calendar.${skipped}`);
-      } else if (res.events_skipped) {
-        toast.info(`Already on your calendar — ${res.events_skipped} duplicate${res.events_skipped > 1 ? "s" : ""} skipped.`);
-      } else {
-        toast.info("Nothing schedulable was found in this document.");
-      }
-      loadData();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setAddingJob(null);
-    }
-  }
-
-  async function handleDismissExtraction(item) {
-    setAddingJob(item.job_id);
-    try {
-      await dismissAllExtractions(item.job_id);
-      toast.info("Dismissed. The document is kept and searchable.");
-      loadData();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setAddingJob(null);
-    }
   }
 
   async function handleDeleteDoc(id) {
@@ -272,16 +130,74 @@ export default function UploadPage() {
     catch (e) { toast.error(e.message); }
   }
 
-  // FR-14a — re-run extraction on a stored document
   async function handleReextract(id) {
     try {
       await reextractDocument(id);
-      toast.info("Re-extraction started…");
+      toast.info("Re-extraction started — watch the Inbox.");
       setTimeout(loadData, 1500);
     } catch (e) { toast.error(e.message); }
   }
 
-  // FR-28 — per-item history view
+  function openDraft(doc) {
+    setDraft({ docId: doc.id, filename: doc.filename, text: "", loading: true });
+    draftReply(doc.id)
+      .then((r) => setDraft((d) => (d ? { ...d, text: r.draft, loading: false } : d)))
+      .catch((e) => { toast.error(e.message); setDraft(null); });
+  }
+
+  async function saveDraftAsNote() {
+    try {
+      await createNote({ title: `Reply: ${draft.filename}`, content: draft.text, classification: "General" });
+      toast.success("Saved reply as a note.");
+      setDraft(null);
+    } catch (e) { toast.error(e.message); }
+  }
+
+  function openRegister() {
+    setRegister([]);
+    getRegister().then(setRegister).catch((e) => { toast.error(e.message); setRegister(null); });
+  }
+
+  function exportCSV(rows) {
+    const header = ["Reference", "File", "Status", "Uploaded", "Reply by", "Classification"];
+    const lines = [header.join(",")].concat(rows.map((r) =>
+      [r.ref_number, r.filename, r.letter_status, r.uploaded_at, r.reply_by, r.classification].map(csvCell).join(",")));
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "correspondence-register.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function printRegister(rows) {
+    const w = window.open("", "_blank");
+    if (!w) { toast.error("Allow pop-ups to print the register."); return; }
+    const body = rows.map((r) => `<tr><td>${esc(r.ref_number) || "—"}</td><td>${esc(r.filename)}</td>` +
+      `<td>${esc(r.letter_status)}</td><td>${esc(fmtDate(r.uploaded_at))}</td>` +
+      `<td>${r.reply_by ? esc(fmtDate(r.reply_by)) : "—"}</td></tr>`).join("");
+    w.document.write(`<html><head><title>Correspondence Register</title>
+      <style>body{font-family:sans-serif;padding:24px}h1{font-size:20px}
+      table{border-collapse:collapse;width:100%;font-size:13px}
+      th,td{border:1px solid #ccc;padding:6px 10px;text-align:left}
+      th{background:#f3f1ea}</style></head><body>
+      <h1>Correspondence Register</h1>
+      <table><thead><tr><th>Reference</th><th>File</th><th>Status</th><th>Uploaded</th><th>Reply by</th></tr></thead>
+      <tbody>${body}</tbody></table></body></html>`);
+    w.document.close(); w.focus(); w.print();
+  }
+
+  async function handleLetterStatus(id, status) {
+    // optimistic update
+    setDocuments((docs) => docs.map((d) => (d.id === id ? { ...d, letter_status: status } : d)));
+    try {
+      await setLetterStatus(id, status);
+      toast.success(`Marked ${status}.`);
+    } catch (e) {
+      toast.error(e.message);
+      loadData();
+    }
+  }
+
   async function openHistory(doc) {
     try {
       const entries = await getAuditLog({ entity_type: "document", entity_id: doc.id });
@@ -290,50 +206,36 @@ export default function UploadPage() {
   }
 
   const doneCount = queue.filter((q) => q.status === "done").length;
+  const reviewCount = pending.length + inProgress.length;
+
+  const btn = (primary) => ({
+    background: primary ? "var(--accent)" : "var(--surface)",
+    color: primary ? "#fff" : "var(--text-2)",
+    border: primary ? "none" : "1px solid var(--border-2)",
+    padding: "10px 18px", borderRadius: "var(--radius-sm)",
+    cursor: "pointer", fontWeight: 600, fontSize: 15,
+  });
 
   return (
-    <div>
-      <h1 style={{ marginBottom: "10px" }}>Upload Documents</h1>
-      <p style={{ color: "#94a3b8", marginBottom: "16px" }}>
-        Upload letters, notices and scanned mail. PDF, JPG, PNG, TIFF — max 50 MB each,
-        up to 20 files per batch.
+    <div style={{ maxWidth: 980 }}>
+      <p style={{ color: "var(--muted)", fontSize: 15.5, margin: "0 0 18px" }}>
+        Upload letters, notices and scanned mail. PDF, JPG, PNG, TIFF — max 50 MB each, up to 20 files.
       </p>
 
-      {/* AI status + run-queue control */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap",
-        background: aiStatus === "ready" ? "#f0fdf4" : "#fff7ed",
-        border: `1px solid ${aiStatus === "ready" ? "#bbf7d0" : "#fed7aa"}`,
-        borderRadius: "14px", padding: "14px 18px", marginBottom: "24px",
-      }}>
-        <span style={{ fontSize: "14px", fontWeight: 600, color: aiStatus === "ready" ? "#15803d" : "#c2410c" }}>
-          {aiStatus === "ready" ? "🤖 AI extraction is ON (gemma3:4b)"
-            : aiStatus == null ? "Checking AI…" : "AI extraction is OFF"}
-        </span>
-        {inProgress.length > 0 && (
-          <>
-            <span style={{ color: "#64748b", fontSize: "13px" }}>
-              {inProgress.length} document(s) processing…
-            </span>
-            <button
-              onClick={handleProcessQueue}
-              disabled={processing || aiStatus !== "ready"}
-              style={{
-                marginLeft: "auto",
-                background: aiStatus === "ready" ? "#2563eb" : "#94a3b8",
-                color: "white", border: "none", padding: "8px 18px",
-                borderRadius: "8px", cursor: aiStatus === "ready" ? "pointer" : "not-allowed",
-                fontWeight: 600, fontSize: "14px",
-              }}
-            >
-              {processing ? "Starting…" : "▶ Run AI on queued"}
-            </button>
-          </>
-        )}
-        {aiStatus !== "ready" && aiStatus != null && (
-          <span style={{ color: "#9a3412", fontSize: "13px" }}>
-            Start Ollama and pull the model — see AI-SETUP.md.
-          </span>
+      {/* AI status + review banner */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 22 }}>
+        <AiStatusBadge online={aiStatus == null ? null : aiStatus === "ready"} />
+        {reviewCount > 0 && (
+          <Link
+            to="/inbox"
+            style={{
+              marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8,
+              background: "var(--accent-soft)", color: "var(--accent)", textDecoration: "none",
+              padding: "8px 16px", borderRadius: 99, fontSize: 14, fontWeight: 700,
+            }}
+          >
+            {pending.length > 0 ? `${pending.length} ready to confirm` : `${inProgress.length} processing`} · Open Inbox →
+          </Link>
         )}
       </div>
 
@@ -342,257 +244,281 @@ export default function UploadPage() {
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); onFilesPicked(e.dataTransfer.files); }}
         style={{
-          background: "#0f172a", border: "2px dashed #334155",
-          borderRadius: "20px", padding: "48px", textAlign: "center", marginBottom: "20px",
+          ...cardStyle,
+          border: "2px dashed var(--border-2)",
+          padding: 44, textAlign: "center", marginBottom: 20,
         }}
       >
-        <h2 style={{ marginBottom: "10px", color: "white" }}>Drag &amp; Drop Documents</h2>
-        <p style={{ color: "#94a3b8", marginBottom: "18px" }}>Select one or many files</p>
-        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.tiff"
+        <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
+        <h2 style={{ margin: "0 0 8px", fontSize: 20 }}>Drag &amp; drop documents</h2>
+        <p style={{ color: "var(--muted)", margin: "0 0 16px", fontSize: 15 }}>or choose one or many files</p>
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.jpg,.jpeg,.png,.tiff"
           onChange={(e) => onFilesPicked(e.target.files)}
-          style={{ color: "#94a3b8" }} />
+          style={{ color: "var(--text-2)" }}
+        />
       </div>
 
-      {/* Batch upload queue (FR-2) */}
+      {/* Upload queue */}
       {queue.length > 0 && (
-        <div style={{ background: "white", borderRadius: "18px", padding: "20px", marginBottom: "20px", boxShadow: "0 4px 16px rgba(0,0,0,0.06)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-            <h3 style={{ margin: 0 }}>Upload Queue — {doneCount}/{queue.length} done</h3>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => setQueue([])} disabled={uploading}
-                style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "8px 16px", borderRadius: "8px", cursor: "pointer" }}>
-                Clear
-              </button>
-              <button onClick={handleBatchUpload} disabled={uploading}
-                style={{ background: uploading ? "#64748b" : "#2563eb", color: "white", border: "none", padding: "8px 20px", borderRadius: "8px", cursor: uploading ? "not-allowed" : "pointer", fontWeight: 600 }}>
+        <div style={{ ...cardStyle, padding: 20, marginBottom: 22 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 17 }}>Upload queue — {doneCount}/{queue.length} done</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setQueue([])} disabled={uploading} style={btn(false)}>Clear</button>
+              <button onClick={handleBatchUpload} disabled={uploading} style={btn(true)}>
                 {uploading ? "Uploading…" : `Upload ${queue.length} file(s)`}
               </button>
             </div>
           </div>
-          {queue.map((item, idx) => (
-            <div key={idx} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "10px 14px", borderRadius: "10px", marginBottom: "8px",
-              background: "#f8fafc", border: "1px solid #e2e8f0",
-            }}>
-              <div>
-                <span style={{ fontWeight: 600, fontSize: "14px" }}>{item.name}</span>
-                <span style={{ color: "#94a3b8", fontSize: "12px", marginLeft: "10px" }}>
-                  {(item.size / 1024).toFixed(0)} KB{item.message ? ` · ${item.message}` : ""}
-                </span>
+          {queue.map((item, idx) => {
+            const c = chip(item.status);
+            return (
+              <div
+                key={idx}
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "12px 14px", borderRadius: 10, marginBottom: 8,
+                  background: "var(--bg)", border: "1px solid var(--border)",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: 15 }}>{item.name}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 13, marginLeft: 10 }}>
+                    {(item.size / 1024).toFixed(0)} KB{item.message ? ` · ${item.message}` : ""}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <span style={{ background: c.bg, color: c.fg, padding: "4px 12px", borderRadius: 99, fontSize: 13, fontWeight: 600 }}>
+                    {item.status === "too-large" ? "too large" : item.status}
+                  </span>
+                  {(item.status === "queued" || item.status === "too-large") && !uploading && (
+                    <button onClick={() => removeFromQueue(idx)}
+                      style={{ background: "none", border: "1px solid var(--border-2)", color: "var(--text-2)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
-              <span style={{
-                background: `${STATUS_COLOR[item.status]}20`, color: STATUS_COLOR[item.status],
-                padding: "3px 12px", borderRadius: "99px", fontSize: "12px", fontWeight: 600,
-              }}>
-                {item.status}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-
-      {/* ── Processing section (live) ─────────────────────────────
-          A document stays here while the AI reads it — parse + extract can
-          take up to a minute — so the page never looks blank mid-extraction. */}
-      <AnimatePresence>
-        {inProgress.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            style={{
-              marginBottom: "28px",
-              background: "linear-gradient(180deg,#eef2ff,#ffffff)",
-              border: "1px solid #c7d2fe", borderRadius: "18px", padding: "20px",
-              boxShadow: "0 6px 20px rgba(79,70,229,0.08)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
-              <Spinner size={20} />
-              <h2 style={{ margin: 0, fontSize: "18px" }}>
-                Processing — {inProgress.length} document{inProgress.length > 1 ? "s" : ""}
-              </h2>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {inProgress.map((doc) => {
-                const stage = (doc.status === "processing" || doc.queue_status === "processing")
-                  ? "Reading & extracting fields…"
-                  : "Queued for the AI…";
-                return (
-                  <div key={doc.id} style={{
-                    background: "white", borderRadius: "12px", padding: "14px 16px",
-                    border: "1px solid #e0e7ff",
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <strong style={{ fontSize: "14px" }}>{doc.filename}</strong>
-                        <p style={{ margin: "2px 0 0", color: "#6366f1", fontSize: "12px", fontWeight: 600 }}>
-                          {stage}
-                        </p>
-                      </div>
-                      <span style={{
-                        background: "#eef2ff", color: "#4338ca", padding: "3px 12px",
-                        borderRadius: "99px", fontSize: "12px", fontWeight: 600, whiteSpace: "nowrap",
-                      }}>
-                        {doc.status === "processing" ? "extracting" : "queued"}
-                      </span>
-                    </div>
-                    <ProgressSweep />
-                  </div>
-                );
-              })}
-            </div>
-            <p style={{ color: "#94a3b8", fontSize: "12px", margin: "12px 0 0" }}>
-              This can take up to a minute per document — results appear here
-              automatically, no refresh needed.
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Ready to add (one-click, no per-item review) ──────────── */}
-      <AnimatePresence>
-        {pending.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            style={{ marginBottom: "28px" }}
-          >
-            <h2 style={{ marginBottom: "6px" }}>✅ Ready to add to your calendar</h2>
-            <p style={{ color: "#64748b", fontSize: "13px", margin: "0 0 14px" }}>
-              Here's what the AI found. Review it below, then add it in one click.
-            </p>
-            {pending.map((item) => (
-              <div key={item.job_id} style={{
-                background: "#f0fdf4", border: "1px solid #bbf7d0",
-                borderRadius: "16px", padding: "18px 20px", marginBottom: "12px",
-                boxShadow: "0 4px 16px rgba(34,197,94,0.07)",
-              }}>
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  gap: "16px", flexWrap: "wrap",
-                }}>
-                  <div style={{ minWidth: 0 }}>
-                    <strong style={{ fontSize: "15px" }}>{item.filename}</strong>
-                    <p style={{ color: "#15803d", fontSize: "13px", margin: "4px 0 0", fontWeight: 600 }}>
-                      {item.extraction_count > 0
-                        ? `${item.extraction_count} item(s) found — extraction complete`
-                        : "Extraction complete"}
-                    </p>
-                    <p style={{ color: "#64748b", fontSize: "12px", margin: "2px 0 0" }}>
-                      Uploaded {fmtDate(item.uploaded_at)}
-                    </p>
-                  </div>
-                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                    <button onClick={() => handleDismissExtraction(item)}
-                      disabled={addingJob === item.job_id}
-                      style={{ background: "transparent", color: "#64748b", border: "1px solid #cbd5e1", padding: "9px 16px", borderRadius: "9px", cursor: "pointer", fontSize: "14px" }}>
-                      Dismiss
-                    </button>
-                    <button onClick={() => handleAddToCalendar(item)}
-                      disabled={addingJob === item.job_id}
-                      style={{
-                        display: "flex", alignItems: "center", gap: "8px",
-                        background: "#16a34a", color: "white", border: "none",
-                        padding: "9px 20px", borderRadius: "9px",
-                        cursor: addingJob === item.job_id ? "wait" : "pointer", fontWeight: 700, fontSize: "14px",
-                        boxShadow: "0 4px 12px rgba(22,163,74,0.25)",
-                      }}>
-                      {addingJob === item.job_id
-                        ? <><Spinner size={15} color="#fff" track="rgba(255,255,255,0.4)" /> Adding…</>
-                        : <>📅 Add to calendar</>}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Preview of exactly what will be added (no confidence/edit) */}
-                <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  {(details[item.job_id] || []).map((ex) => (
-                    <ExtractionPreview key={ex.id} ex={ex} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Uploaded documents */}
       {documents.length > 0 && (
         <div>
-          <h2 style={{ marginBottom: "14px" }}>Uploaded Documents</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            {documents.map((doc) => (
-              <div key={doc.id} style={{
-                background: "rgba(255,255,255,0.7)", backdropFilter: "blur(10px)",
-                borderRadius: "14px", padding: "16px 20px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-              }}>
-                <div>
-                  <strong>{doc.filename}</strong>
-                  <p style={{ color: "#64748b", fontSize: "12px", margin: "4px 0 0" }}>
-                    {doc.file_type.toUpperCase()} — uploaded {fmtDate(doc.uploaded_at)}
-                  </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "0 0 14px" }}>
+            <h2 style={{ margin: 0, fontSize: 19 }}>Your documents</h2>
+            <button onClick={openRegister}
+              style={{ marginLeft: "auto", ...btn(false), padding: "6px 14px", fontSize: 13.5, borderRadius: 99 }}>
+              📋 Register
+            </button>
+            <button
+              onClick={() => setAwaitingOnly((v) => !v)}
+              style={{
+                border: "1px solid var(--border-2)", cursor: "pointer",
+                padding: "6px 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600,
+                background: awaitingOnly ? "var(--warn-soft)" : "var(--surface)",
+                color: awaitingOnly ? "var(--warn)" : "var(--text-2)",
+              }}
+            >
+              {awaitingOnly ? "✓ Awaiting reply" : "Awaiting reply"}
+            </button>
+          </div>
+          <div style={{ ...cardStyle, overflow: "hidden" }}>
+            {(awaitingOnly ? documents.filter((d) => (d.letter_status || "open") === "open") : documents).map((doc, i, arr) => {
+              const c = chip(doc.status);
+              const ls = LETTER_CHIP[doc.letter_status || "open"];
+              return (
+                <div
+                  key={doc.id}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                    padding: "16px 20px",
+                    borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <strong style={{ fontSize: 16 }}>{doc.filename}</strong>
+                    <p style={{ color: "var(--muted)", fontSize: 13.5, margin: "3px 0 0" }}>
+                      {(doc.file_type || "").toUpperCase()} — uploaded {fmtDate(doc.uploaded_at)}
+                      {doc.ref_number ? ` · ${doc.ref_number}` : ""}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    <span title="Correspondence status"
+                      style={{ background: ls.bg, color: ls.fg, padding: "4px 12px", borderRadius: 99, fontSize: 13, fontWeight: 700 }}>
+                      {ls.label}
+                    </span>
+                    <select value={doc.letter_status || "open"} onChange={(e) => handleLetterStatus(doc.id, e.target.value)}
+                      title="Set correspondence status"
+                      style={{ ...btn(false), padding: "6px 8px", fontSize: 13, cursor: "pointer" }}>
+                      <option value="open">Open</option>
+                      <option value="replied">Replied</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                    <span style={{ background: c.bg, color: c.fg, padding: "4px 12px", borderRadius: 99, fontSize: 13, fontWeight: 600 }}>
+                      {doc.status}
+                    </span>
+                    <button onClick={() => setConnDoc(doc)} style={{ ...btn(false), padding: "6px 12px", fontSize: 13 }}>Links</button>
+                    <button onClick={() => openDraft(doc)} disabled={aiStatus !== "ready"}
+                      title={aiStatus === "ready" ? "Draft a reply (local AI)" : "AI offline"}
+                      style={{ ...btn(false), padding: "6px 12px", fontSize: 13, opacity: aiStatus === "ready" ? 1 : 0.5, cursor: aiStatus === "ready" ? "pointer" : "not-allowed" }}>
+                      Draft reply
+                    </button>
+                    <a href={documentDownloadUrl(doc.id)} target="_blank" rel="noreferrer" style={{ ...btn(false), padding: "6px 12px", fontSize: 13, textDecoration: "none" }}>Open</a>
+                    <button onClick={() => handleReextract(doc.id)} disabled={aiStatus !== "ready"}
+                      title={aiStatus === "ready" ? "Re-run AI extraction" : "AI offline"}
+                      style={{ ...btn(false), padding: "6px 12px", fontSize: 13, opacity: aiStatus === "ready" ? 1 : 0.5, cursor: aiStatus === "ready" ? "pointer" : "not-allowed" }}>
+                      Re-extract
+                    </button>
+                    <button onClick={() => openHistory(doc)} style={{ ...btn(false), padding: "6px 12px", fontSize: 13 }}>History</button>
+                    <button onClick={() => handleDeleteDoc(doc.id)} style={{ ...btn(false), padding: "6px 12px", fontSize: 13, color: "var(--danger)", borderColor: "var(--danger)" }}>Trash</button>
+                  </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{
-                    background: `${STATUS_COLOR[doc.status] ?? "#94a3b8"}20`,
-                    color: STATUS_COLOR[doc.status] ?? "#94a3b8",
-                    padding: "4px 12px", borderRadius: "99px", fontSize: "12px", fontWeight: 600,
-                  }}>{doc.status}</span>
-                  <a href={documentDownloadUrl(doc.id)} target="_blank" rel="noreferrer"
-                    style={{ color: "#2563eb", border: "1px solid #2563eb", padding: "4px 12px", borderRadius: "8px", fontSize: "12px", textDecoration: "none" }}>
-                    Open
-                  </a>
-                  <button onClick={() => handleReextract(doc.id)} disabled={aiStatus !== "ready"}
-                    title={aiStatus === "ready" ? "Re-run AI extraction" : "AI offline"}
-                    style={{ background: "transparent", color: aiStatus === "ready" ? "#0891b2" : "#94a3b8", border: `1px solid ${aiStatus === "ready" ? "#0891b2" : "#cbd5e1"}`, padding: "4px 12px", borderRadius: "8px", cursor: aiStatus === "ready" ? "pointer" : "not-allowed", fontSize: "12px" }}>
-                    Re-extract
-                  </button>
-                  <button onClick={() => openHistory(doc)}
-                    style={{ background: "transparent", color: "#7c3aed", border: "1px solid #7c3aed", padding: "4px 12px", borderRadius: "8px", cursor: "pointer", fontSize: "12px" }}>
-                    History
-                  </button>
-                  <button onClick={() => handleDeleteDoc(doc.id)}
-                    style={{ background: "transparent", color: "#ef4444", border: "1px solid #ef4444", padding: "4px 12px", borderRadius: "8px", cursor: "pointer", fontSize: "12px" }}>
-                    Trash
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* FR-28 — per-item history modal */}
+      {/* History modal */}
       {history && (
-        <div onClick={() => setHistory(null)}
+        <div
+          onClick={() => setHistory(null)}
           style={{
-            position: "fixed", inset: 0, zIndex: 1000,
-            background: "rgba(15,23,42,0.5)", backdropFilter: "blur(4px)",
-            display: "flex", alignItems: "center", justifyContent: "center", padding: "20px",
-          }}>
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}
+        >
+          <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: "white", borderRadius: "20px", padding: "26px", width: "100%", maxWidth: "560px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,0.3)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            style={{ ...cardStyle, padding: 26, width: "100%", maxWidth: 560, maxHeight: "80vh", overflowY: "auto" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <h3 style={{ margin: 0 }}>History — {history.doc.filename}</h3>
-              <button onClick={() => setHistory(null)}
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "20px" }}>×</button>
+              <button onClick={() => setHistory(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 22 }}>×</button>
             </div>
             {history.entries.length === 0 ? (
-              <p style={{ color: "#94a3b8" }}>No history recorded.</p>
+              <p style={{ color: "var(--muted)" }}>No history recorded.</p>
             ) : (
               history.entries.map((entry) => (
-                <div key={entry.id} style={{ padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
-                  <strong style={{ color: "#2563eb" }}>{entry.action}</strong>
+                <div key={entry.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+                  <strong style={{ color: "var(--accent)" }}>{entry.action}</strong>
                   {entry.detail ? ` — ${entry.detail}` : ""}
-                  <p style={{ margin: "3px 0 0", color: "#94a3b8", fontSize: "12px" }}>
-                    {fmtDateTime(entry.created_at)}
-                  </p>
+                  <p style={{ margin: "3px 0 0", color: "var(--muted)", fontSize: 12.5 }}>{fmtDateTime(entry.created_at)}</p>
                 </div>
               ))
             )}
-          </motion.div>
+          </div>
+        </div>
+      )}
+
+      {/* Connections modal */}
+      {connDoc && (
+        <div
+          onClick={() => setConnDoc(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ ...cardStyle, padding: 26, width: "100%", maxWidth: 560, maxHeight: "80vh", overflowY: "auto" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <h3 style={{ margin: 0 }}>Connections — {connDoc.filename}</h3>
+              <button onClick={() => setConnDoc(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 22 }}>×</button>
+            </div>
+            <Connections kind="document" id={connDoc.id} />
+            <p style={{ color: "var(--muted)", fontSize: 13 }}>
+              Nothing here yet means this letter isn't linked to other items.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Reply-draft modal */}
+      {draft && (
+        <div onClick={() => setDraft(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ ...cardStyle, padding: 26, width: "100%", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Draft reply — {draft.filename}</h3>
+              <button onClick={() => setDraft(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 22 }}>×</button>
+            </div>
+            {draft.loading ? (
+              <p style={{ color: "var(--muted)" }}>Drafting a reply with the local model…</p>
+            ) : (
+              <>
+                <textarea value={draft.text} onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
+                  style={{ width: "100%", minHeight: 260, padding: 14, borderRadius: 10, border: "1px solid var(--border)", fontSize: 15, lineHeight: 1.6, boxSizing: "border-box", resize: "vertical", background: "var(--bg)", color: "var(--text)" }} />
+                <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                  <button onClick={saveDraftAsNote} style={{ ...btn(true) }}>Save as note</button>
+                  <button onClick={() => { navigator.clipboard?.writeText(draft.text); toast.info("Copied."); }} style={{ ...btn(false) }}>Copy</button>
+                </div>
+                <p style={{ color: "var(--muted)", fontSize: 12.5, marginTop: 10 }}>
+                  AI-drafted from the letter. Review and edit before sending — nothing is sent automatically.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Correspondence register modal */}
+      {register && (
+        <div onClick={() => setRegister(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ ...cardStyle, padding: 24, width: "100%", maxWidth: 860, maxHeight: "85vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <h3 style={{ margin: 0 }}>Correspondence register</h3>
+              <span style={{ color: "var(--muted)", fontSize: 13.5 }}>{register.length} letter(s)</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                <button onClick={() => exportCSV(register)} style={{ ...btn(false), padding: "7px 14px", fontSize: 13.5 }}>Export CSV</button>
+                <button onClick={() => printRegister(register)} style={{ ...btn(false), padding: "7px 14px", fontSize: 13.5 }}>Print</button>
+                <button onClick={() => setRegister(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 22 }}>×</button>
+              </div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "var(--muted)" }}>
+                    {["Reference", "File", "Status", "Uploaded", "Reply by"].map((h) => (
+                      <th key={h} style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".4px" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {register.map((r) => {
+                    const ls = LETTER_CHIP[r.letter_status || "open"];
+                    return (
+                      <tr key={r.id}>
+                        <td style={{ padding: "10px", borderBottom: "1px solid var(--border)" }}>{r.ref_number || "—"}</td>
+                        <td style={{ padding: "10px", borderBottom: "1px solid var(--border)" }}>{r.filename}</td>
+                        <td style={{ padding: "10px", borderBottom: "1px solid var(--border)" }}>
+                          <span style={{ background: ls.bg, color: ls.fg, padding: "2px 10px", borderRadius: 99, fontSize: 12.5, fontWeight: 700 }}>{ls.label}</span>
+                        </td>
+                        <td style={{ padding: "10px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{fmtDate(r.uploaded_at)}</td>
+                        <td style={{ padding: "10px", borderBottom: "1px solid var(--border)", color: r.reply_by ? "var(--warn)" : "var(--muted)" }}>{r.reply_by ? fmtDate(r.reply_by) : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                  {register.length === 0 && (
+                    <tr><td colSpan={5} style={{ padding: 20, color: "var(--muted)" }}>No letters yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>

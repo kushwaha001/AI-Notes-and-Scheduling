@@ -27,7 +27,7 @@ def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
     try:
         # Non-recurring events — listed individually (most recent `limit`)
         cur.execute("""
-            SELECT id, title, event_date, event_time, venue, classification, source
+            SELECT id, title, event_date, event_time, event_end_time, venue, classification, source
             FROM events
             WHERE status != 'trashed' AND recurrence_id IS NULL AND users_id = %s
             ORDER BY event_date DESC NULLS LAST
@@ -39,7 +39,8 @@ def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
                 "id": e["id"],
                 "title": e["title"],
                 "date": str(e["event_date"]) if e["event_date"] else None,
-                "time": str(e["event_time"]) if e["event_time"] else None,
+                "time": str(e["event_time"])[:5] if e["event_time"] else None,
+                "end_time": str(e["event_end_time"])[:5] if e["event_end_time"] else None,
                 "subtitle": e["venue"] or "",
                 "classification": e["classification"],
                 "source": e["source"],
@@ -50,7 +51,7 @@ def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
         # Recurring events — collapse each series to ONE entry (next upcoming,
         # or the latest past), with the total occurrence count.
         cur.execute("""
-            SELECT id, title, event_date, event_time, venue, classification, source, recurrence_id
+            SELECT id, title, event_date, event_time, event_end_time, venue, classification, source, recurrence_id
             FROM events
             WHERE status != 'trashed' AND recurrence_id IS NOT NULL AND users_id = %s
         """, (uid,))
@@ -68,7 +69,8 @@ def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
                 "id": rep["id"],
                 "title": rep["title"],
                 "date": str(rep["event_date"]) if rep["event_date"] else None,
-                "time": str(rep["event_time"]) if rep["event_time"] else None,
+                "time": str(rep["event_time"])[:5] if rep["event_time"] else None,
+                "end_time": str(rep["event_end_time"])[:5] if rep["event_end_time"] else None,
                 "subtitle": rep["venue"] or "",
                 "classification": rep["classification"],
                 "source": rep["source"],
@@ -78,7 +80,7 @@ def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
 
         # Tasks — keyed by due_date (fall back to created_at)
         cur.execute("""
-            SELECT id, title, due_date, status, classification, source, created_at
+            SELECT id, title, due_date, start_time, end_time, status, classification, source, created_at
             FROM tasks WHERE deleted_at IS NULL AND users_id = %s
         """, (uid,))
         for t in cur.fetchall():
@@ -88,7 +90,8 @@ def timeline(limit: int = 200, user: CurrentUser = Depends(current_user)):
                 "id": t["id"],
                 "title": t["title"],
                 "date": str(when).split(" ")[0] if when else None,
-                "time": None,
+                "time": str(t["start_time"])[:5] if t["start_time"] else None,
+                "end_time": str(t["end_time"])[:5] if t["end_time"] else None,
                 "subtitle": f"Task — {t['status']}",
                 "classification": t["classification"],
                 "source": t["source"],

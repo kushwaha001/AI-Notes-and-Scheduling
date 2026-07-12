@@ -10,6 +10,7 @@ under backend/qdrant_data, which persists across restarts.
 import os
 import hashlib
 import logging
+from threading import Lock
 
 from api.config import BASE_DIR, QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION
 
@@ -17,17 +18,26 @@ log = logging.getLogger(__name__)
 
 COLLECTION = QDRANT_COLLECTION
 _client = None
+_client_lock = Lock()
 
 
 def get_client():
+    """Singleton Qdrant client, thread-safe (double-checked locking).
+
+    The embedded store allows exactly ONE accessor per process: without the
+    lock, two FastAPI worker threads racing through the None-check would both
+    construct a client and the loser would crash with "already accessed by
+    another instance" — silently skipping that request's indexing."""
     global _client
     if _client is None:
-        from qdrant_client import QdrantClient
-        if QDRANT_URL:
-            _client = QdrantClient(url=QDRANT_URL, api_key=(QDRANT_API_KEY or None))
-        else:
-            path = os.path.join(BASE_DIR, "qdrant_data")
-            _client = QdrantClient(path=path)   # embedded — no server required
+        with _client_lock:
+            if _client is None:
+                from qdrant_client import QdrantClient
+                if QDRANT_URL:
+                    _client = QdrantClient(url=QDRANT_URL, api_key=(QDRANT_API_KEY or None))
+                else:
+                    path = os.path.join(BASE_DIR, "qdrant_data")
+                    _client = QdrantClient(path=path)   # embedded — no server required
     return _client
 
 

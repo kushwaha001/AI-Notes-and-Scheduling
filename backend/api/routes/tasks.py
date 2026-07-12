@@ -1,12 +1,16 @@
-from datetime import datetime
+from datetime import datetime, date
+from calendar import monthrange
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from api.models import ManualTask, TaskUpdate
 from api.db import get_db
 from api.auth import current_user, CurrentUser
 
 router = APIRouter(tags=["Tasks"])
+
+MAX_TASK_OCCURRENCES = 60   # safety cap for recurring task generation
 
 
 def _parse_date(s):
@@ -18,6 +22,21 @@ def _parse_date(s):
         except ValueError:
             continue
     return s
+
+
+def _step(d: date, freq: str, interval: int) -> date:
+    """Advance a due date by one recurrence step (daily/weekly/monthly)."""
+    interval = max(1, interval or 1)
+    if freq == "daily":
+        return date.fromordinal(d.toordinal() + interval)
+    if freq == "weekly":
+        return date.fromordinal(d.toordinal() + 7 * interval)
+    if freq == "monthly":
+        m = d.month - 1 + interval
+        y = d.year + m // 12
+        m = m % 12 + 1
+        return date(y, m, min(d.day, monthrange(y, m)[1]))
+    return d
 
 
 @router.get("/tasks/open")
@@ -127,30 +146,64 @@ def get_task(task_id: int, user: CurrentUser = Depends(current_user)):
 
 @router.post("/tasks/manual")
 def create_task_manual(task: ManualTask, user: CurrentUser = Depends(current_user)):
-    """FR-7 — manual task creation. No AI. Always works."""
+    """FR-7 — manual task creation. No AI. Always works. Optional recurrence spawns
+    repeated instances (daily/weekly/monthly)."""
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("""
-            INSERT INTO tasks (users_id, title, due_date, classification, source, status)
-            VALUES (%s, %s, %s, %s, 'manual', 'open')
-            RETURNING id
-        """, (user["id"], task.title, _parse_date(task.due_date), task.category or None))
-        task_id = cur.fetchone()["id"]
+        # Build the list of due dates (one, or several for a recurring task).
+        base = _parse_date(task.due_date)
+        dates = [base]
+        if task.recurrence in ("daily", "weekly", "monthly") and isinstance(base, date):
+            n = max(1, min(MAX_TASK_OCCURRENCES, task.count or 1))
+            cur_d = base
+            while len(dates) < n:
+                cur_d = _step(cur_d, task.recurrence, task.interval or 1)
+                dates.append(cur_d)
+
+        first_id = None
+        for d in dates:
+            cur.execute("""
+                INSERT INTO tasks (users_id, title, due_date, start_time, end_time, classification, priority, source, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'manual', 'open')
+                RETURNING id
+            """, (
+                user["id"], task.title, d,
+                task.start_time or None, task.end_time or None,
+                task.category or None, task.priority or "Medium"
+            ))
+            tid = cur.fetchone()["id"]
+            if first_id is None:
+                first_id = tid
 
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('manual_entry', 'task', %s, %s)
-        """, (task_id, task.title))
+        """, (first_id, task.title + (f" (×{len(dates)})" if len(dates) > 1 else "")))
 
         conn.commit()
-        return {"status": "saved", "task_id": task_id}
+        return {"status": "saved", "task_id": first_id, "created": len(dates)}
     except Exception as e:
         conn.rollback()
         raise HTTPException(500, str(e))
     finally:
         cur.close()
         conn.close()
+
+
+class ParseRequest(BaseModel):
+    text: str
+
+
+@router.post("/tasks/parse")
+def parse_capture_endpoint(req: ParseRequest, user: CurrentUser = Depends(current_user)):
+    """Natural-language quick capture: 'pay bill next Tuesday, high priority' →
+    parsed fields for the user to confirm and save. Local LLM."""
+    from api.ai.generate import parse_capture
+    try:
+        return parse_capture(req.text)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
 
 
 @router.patch("/tasks/{task_id}")
@@ -161,10 +214,13 @@ def update_task(task_id: int, update: TaskUpdate,
     cur = conn.cursor()
     try:
         fields = {}
-        if update.title    is not None: fields["title"]          = update.title
-        if update.status   is not None: fields["status"]         = update.status
-        if update.category is not None: fields["classification"] = update.category
-        if update.due_date is not None: fields["due_date"]       = _parse_date(update.due_date)
+        if update.title      is not None: fields["title"]          = update.title
+        if update.status     is not None: fields["status"]         = update.status
+        if update.category   is not None: fields["classification"] = update.category
+        if update.priority   is not None: fields["priority"]       = update.priority
+        if update.due_date   is not None: fields["due_date"]       = _parse_date(update.due_date)
+        if update.start_time is not None: fields["start_time"]     = update.start_time or None
+        if update.end_time   is not None: fields["end_time"]       = update.end_time or None
 
         if not fields:
             return {"status": "no changes", "task_id": task_id}
@@ -178,6 +234,22 @@ def update_task(task_id: int, update: TaskUpdate,
         )
         if cur.rowcount == 0:
             raise HTTPException(404, "Task not found.")
+
+        # Correspondence lifecycle: completing a reply task marks the source
+        # letter 'replied' (only if it's still open — never downgrades a manual
+        # 'closed'). Ties the reply-by workflow to the letter's status.
+        if fields.get("status") == "done":
+            cur.execute("SELECT is_reply_task FROM tasks WHERE id = %s", (task_id,))
+            row = cur.fetchone()
+            if row and row["is_reply_task"]:
+                cur.execute("""
+                    UPDATE documents SET letter_status = 'replied'
+                    WHERE letter_status = 'open' AND users_id = %s AND id IN (
+                        SELECT source_id FROM linked_documents
+                        WHERE source_type = 'document' AND entity_type = 'task' AND entity_id = %s
+                    )
+                """, (user["id"], task_id))
+
         cur.execute("""
             INSERT INTO audit_log (action, entity_type, entity_id, detail)
             VALUES ('edited', 'task', %s, %s)

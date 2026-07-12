@@ -4,6 +4,7 @@ import EventDetailModal from "../components/EventDetailModal";
 import TaskDetailModal from "../components/TaskDetailModal";
 import DateInput, { fmtDate, toApiDate } from "../components/DateInput";
 import { motion } from "framer-motion";
+import Skeleton from "../components/Skeleton";
 import { createEvent, getEvents, deleteEvent, updateEvent, getTasks, createTask } from "../services/api";
 
 const MONTHS = ["January","February","March","April","May","June",
@@ -11,6 +12,19 @@ const MONTHS = ["January","February","March","April","May","June",
 const MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const CATEGORIES = ["General","Meeting","Reply","Review","Personal","Restricted","Confidential"];
+
+function timeOverlaps(s1, e1, s2, e2) {
+  if (!s1 || !s2) return true; // if either lacks a time, assume conflict to be safe
+  const toMin = (t) => {
+    const p = String(t).split(":");
+    return Number(p[0]) * 60 + Number(p[1]);
+  };
+  const start1 = toMin(s1);
+  const end1 = e1 ? toMin(e1) : start1 + 60;
+  const start2 = toMin(s2);
+  const end2 = e2 ? toMin(e2) : start2 + 60;
+  return start1 < end2 && start2 < end1;
+}
 
 // ── Year view ─────────────────────────────────────────────────────────────────
 function YearView({ year, events, tasks, onDayClick }) {
@@ -30,13 +44,13 @@ function YearView({ year, events, tasks, onDayClick }) {
         const startDow = firstDay.getDay();
 
         return (
-          <div key={mi} style={{ background: "#f8fafc", borderRadius: "12px", padding: "12px" }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "13px", color: "#1e293b" }}>
+          <div key={mi} style={{ background: "var(--bg)", borderRadius: "12px", padding: "12px" }}>
+            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "13px", color: "var(--text)" }}>
               {MONTHS[mi]}
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px" }}>
               {DAYS.map((d) => (
-                <div key={d} style={{ fontSize: "9px", color: "#94a3b8", textAlign: "center" }}>{d}</div>
+                <div key={d} style={{ fontSize: "9px", color: "var(--muted)", textAlign: "center" }}>{d}</div>
               ))}
               {Array.from({ length: startDow }, (_, i) => (
                 <div key={`e${i}`} />
@@ -49,10 +63,10 @@ function YearView({ year, events, tasks, onDayClick }) {
                 const hasTask = taskDates.has(dateStr);
 
                 // colour priority: today > event (blue) > task (green)
-                let bg = "transparent", fg = "#374151";
-                if (isToday)      { bg = "#2563eb"; fg = "white"; }
-                else if (hasEv)   { bg = "#bfdbfe"; fg = "#1d4ed8"; }
-                else if (hasTask) { bg = "#bbf7d0"; fg = "#15803d"; }
+                let bg = "transparent", fg = "var(--text-2)";
+                if (isToday)      { bg = "var(--accent)"; fg = "white"; }
+                else if (hasEv)   { bg = "var(--accent-soft)"; fg = "var(--accent)"; }
+                else if (hasTask) { bg = "var(--ok-soft)"; fg = "var(--ok)"; }
 
                 return (
                   <div
@@ -102,8 +116,8 @@ export default function CalendarPage() {
   const [showAddMenu, setShowAddMenu] = useState(false);
 
   const EMPTY_FORM = {
-    title: "", event_date: "", event_time: "",
-    venue: "", attendees: "", classification: "General",
+    title: "", event_date: "", event_time: "", event_end_time: "",
+    venue: "", attendees: "", classification: "General", priority: "Medium",
     recurrence: "", interval: 1, end_date: "", end_count: "",
   };
   const [form, setForm]     = useState(EMPTY_FORM);
@@ -126,13 +140,25 @@ export default function CalendarPage() {
   // delete confirmation modal
   const [deleteTarget, setDeleteTarget] = useState(null); // { id, title, isRecurring }
 
+  // Skeleton while the very first events fetch is in flight.
+  const [eventsLoading, setEventsLoading] = useState(true);
+
   useEffect(() => {
-    getEvents().then(setAllEvents).catch(() => {});
+    getEvents().then(setAllEvents).catch(() => {}).finally(() => setEventsLoading(false));
     getTasks({}).then(setAllTasks).catch(() => {});
   }, [refreshKey]);
 
+  // "YYYY-MM-DD" strictly before today (local) — warn before saving into the past.
+  function isPastDate(d) {
+    if (!d) return false;
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    return new Date(`${d}T00:00:00`) < t;
+  }
+
   async function handleCreateTask() {
     if (!taskForm.title) { setTaskMsg("Title is required."); return; }
+    if (isPastDate(taskForm.due_date) &&
+        !window.confirm(`⚠ The due date (${fmtDate(taskForm.due_date)}) is in the past.\nAdd it anyway?`)) return;
     try {
       await createTask({
         title   : taskForm.title,
@@ -150,15 +176,22 @@ export default function CalendarPage() {
 
   async function handleCreate() {
     if (!form.title || !form.event_date) { setMsg("Title and date are required."); return; }
+    if (isPastDate(form.event_date) &&
+        !window.confirm(`⚠ ${fmtDate(form.event_date)} is in the past.\nAdd this event anyway?`)) return;
     setSaving(true); setMsg("");
     try {
-      // conflict warning at save
+      // conflict warning at save (checks overlapping time ranges on same date)
       const clash = allEvents.find(
-        (e) => String(e.event_date).split("T")[0] === form.event_date
+        (e) => {
+          const sameDate = String(e.event_date).split("T")[0] === form.event_date;
+          if (!sameDate) return false;
+          return timeOverlaps(form.event_time, form.event_end_time, e.event_time, e.event_end_time);
+        }
       );
       if (clash) {
+        const timeStr = clash.event_time ? ` at ${clash.event_time.slice(0, 5)}` : "";
         const ok = window.confirm(
-          `⚠ Conflict: "${clash.title}" is already on ${fmtDate(form.event_date)}.\nSave anyway?`
+          `⚠ Conflict: "${clash.title}" is already scheduled${timeStr} on ${fmtDate(form.event_date)}.\nSave anyway?`
         );
         if (!ok) { setSaving(false); return; }
       }
@@ -170,6 +203,7 @@ export default function CalendarPage() {
         attendees     : form.attendees,
         category      : form.classification,
         classification: form.classification,
+        priority      : form.priority,
       };
       // FR-20 — recurrence
       if (form.recurrence) {
@@ -196,9 +230,11 @@ export default function CalendarPage() {
       title     : ev.title || "",
       event_date: String(ev.event_date).split("T")[0],
       event_time: ev.event_time ? String(ev.event_time).slice(0, 5) : "",
+      event_end_time: ev.event_end_time ? String(ev.event_end_time).slice(0, 5) : "",
       venue     : ev.venue || "",
       attendees : ev.attendees || "",
       classification: ev.classification || "General",
+      priority  : ev.priority || "Medium",
     });
   }
 
@@ -209,9 +245,11 @@ export default function CalendarPage() {
         title         : editing.title,
         event_date    : toApiDate(editing.event_date),
         event_time    : editing.event_time,
+        event_end_time: editing.event_end_time,
         venue         : editing.venue,
         attendees     : editing.attendees,
         category      : editing.classification,
+        priority      : editing.priority,
       });
       setEditing(null);
       setRefreshKey((k) => k + 1);
@@ -260,16 +298,9 @@ export default function CalendarPage() {
 
   return (
     <>
-      <div style={{ marginBottom: "24px" }}>
-        <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
-          Calendar Workspace
-        </p>
-        <h1 style={{ margin: 0, fontSize: "42px" }}>Schedule &amp; Events</h1>
-      </div>
-
       {/* Unified view switcher (Month / Week / Day / Year) */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: "13px", color: "#64748b", marginRight: "2px", fontWeight: 600 }}>View:</span>
+        <span style={{ fontSize: "13px", color: "var(--muted)", marginRight: "2px", fontWeight: 600 }}>View:</span>
         {[
           { key: "month-grid", label: "Month" },
           { key: "week",       label: "Week" },
@@ -281,8 +312,8 @@ export default function CalendarPage() {
             onClick={() => setActiveView(v.key)}
             style={{
               padding: "8px 18px", borderRadius: "10px", border: "none",
-              background: activeView === v.key ? "#2563eb" : "#f1f5f9",
-              color: activeView === v.key ? "white" : "#475569",
+              background: activeView === v.key ? "var(--accent)" : "var(--surface-2)",
+              color: activeView === v.key ? "white" : "var(--text-2)",
               fontWeight: 600, cursor: "pointer", fontSize: "14px",
             }}
           >
@@ -293,11 +324,11 @@ export default function CalendarPage() {
 
         {/* Colour legend */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginRight: "8px" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#64748b" }}>
-            <span style={{ width: "10px", height: "10px", borderRadius: "3px", background: "#2563eb" }} /> Events
+          <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "var(--muted)" }}>
+            <span style={{ width: "10px", height: "10px", borderRadius: "3px", background: "var(--accent)" }} /> Events
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#64748b" }}>
-            <span style={{ width: "10px", height: "10px", borderRadius: "3px", background: "#16a34a" }} /> Tasks
+          <span style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "var(--muted)" }}>
+            <span style={{ width: "10px", height: "10px", borderRadius: "3px", background: "var(--ok)" }} /> Tasks
           </span>
         </div>
 
@@ -306,31 +337,31 @@ export default function CalendarPage() {
           <button
             onClick={() => setShowAddMenu((v) => !v)}
             style={{
-              background: "#2563eb", color: "white", border: "none",
+              background: "var(--accent)", color: "white", border: "none",
               padding: "9px 20px", borderRadius: "10px", cursor: "pointer",
               fontWeight: 600, fontSize: "14px",
             }}
           >
-            + Add ▾
+            + New ▾
           </button>
           {showAddMenu && (
             <div style={{
               position: "absolute", right: 0, top: "44px", zIndex: 50,
-              background: "white", borderRadius: "12px", overflow: "hidden",
-              boxShadow: "0 12px 30px rgba(0,0,0,0.18)", border: "1px solid #e2e8f0",
+              background: "var(--surface)", borderRadius: "12px", overflow: "hidden",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.18)", border: "1px solid var(--border)",
               minWidth: "160px",
             }}>
               <button
                 onClick={() => { setShowAddMenu(false); setShowTaskForm(false); setShowForm(true); setMsg(""); }}
-                style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: "14px", color: "#1e3a8a", fontWeight: 600 }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: "14px", color: "var(--accent)", fontWeight: 600 }}
               >
-                📅 New Event
+                📅 New event
               </button>
               <button
                 onClick={() => { setShowAddMenu(false); setShowForm(false); setShowTaskForm(true); setTaskMsg(""); }}
-                style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 16px", border: "none", borderTop: "1px solid #f1f5f9", background: "transparent", cursor: "pointer", fontSize: "14px", color: "#14532d", fontWeight: 600 }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 16px", border: "none", borderTop: "1px solid var(--border)", background: "transparent", cursor: "pointer", fontSize: "14px", color: "var(--ok)", fontWeight: 600 }}
               >
-                📋 New Task
+                📋 New task
               </button>
             </div>
           )}
@@ -343,41 +374,41 @@ export default function CalendarPage() {
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: "auto" }}
           style={{
-            background: "white", borderRadius: "18px",
+            background: "var(--surface)", borderRadius: "18px",
             padding: "22px", marginBottom: "20px",
             boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-            border: "1px solid #e2e8f0",
+            border: "1px solid var(--border)",
           }}
         >
           <h3 style={{ margin: "0 0 16px" }}>New Task</h3>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "12px", marginBottom: "16px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Title *</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Title *</label>
               <input type="text" value={taskForm.title}
                 onChange={(e) => setTaskForm((f) => ({ ...f, title: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }} />
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }} />
             </div>
             <DateInput label="Due Date" value={taskForm.due_date}
               onChange={(v) => setTaskForm((f) => ({ ...f, due_date: v }))} />
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Category</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Category</label>
               <select value={taskForm.category}
                 onChange={(e) => setTaskForm((f) => ({ ...f, category: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}>
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}>
                 {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
               </select>
             </div>
           </div>
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button onClick={handleCreateTask}
-              style={{ background: "#16a34a", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+              style={{ background: "var(--accent)", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
               Save Task
             </button>
             <button onClick={() => { setShowTaskForm(false); setTaskMsg(""); }}
-              style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
+              style={{ background: "transparent", color: "var(--muted)", border: "1px solid var(--border)", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
               Cancel
             </button>
-            {taskMsg && <span style={{ color: taskMsg.startsWith("Error") ? "#ef4444" : "#10b981", fontSize: "14px" }}>{taskMsg}</span>}
+            {taskMsg && <span style={{ color: taskMsg.startsWith("Error") ? "var(--danger)" : "var(--ok)", fontSize: "14px" }}>{taskMsg}</span>}
           </div>
         </motion.div>
       )}
@@ -388,66 +419,82 @@ export default function CalendarPage() {
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: "auto" }}
           style={{
-            background: "white", borderRadius: "18px",
+            background: "var(--surface)", borderRadius: "18px",
             padding: "22px", marginBottom: "20px",
             boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-            border: "1px solid #e2e8f0",
+            border: "1px solid var(--border)",
           }}
         >
           <h3 style={{ margin: "0 0 16px" }}>New Event</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Title *</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Title *</label>
               <input type="text" value={form.title}
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
               />
             </div>
             <DateInput label="Date" required value={form.event_date}
               onChange={(v) => setForm((f) => ({ ...f, event_date: v }))} />
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Time</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Start Time</label>
               <input type="time" value={form.event_time}
                 onChange={(e) => setForm((f) => ({ ...f, event_time: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>End Time</label>
+              <input type="time" value={form.event_end_time || ""}
+                onChange={(e) => setForm((f) => ({ ...f, event_end_time: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
               />
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "16px" }}>
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Venue</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Venue</label>
               <input type="text" value={form.venue}
                 onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
               />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Attendees</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Attendees</label>
               <input type="text" value={form.attendees}
                 onChange={(e) => setForm((f) => ({ ...f, attendees: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
               />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Classification</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Classification</label>
               <select value={form.classification}
                 onChange={(e) => setForm((f) => ({ ...f, classification: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
               >
                 {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Priority</label>
+              <select value={form.priority}
+                onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}
+              >
+                {["Low", "Medium", "High", "Critical"].map((p) => <option key={p}>{p}</option>)}
               </select>
             </div>
           </div>
 
           {/* FR-20 — recurrence */}
-          <div style={{ background: "#f8fafc", borderRadius: "12px", padding: "14px", marginBottom: "16px", border: "1px solid #e2e8f0" }}>
-            <label style={{ display: "block", fontSize: "13px", color: "#475569", fontWeight: 600, marginBottom: "10px" }}>
+          <div style={{ background: "var(--bg)", borderRadius: "12px", padding: "14px", marginBottom: "16px", border: "1px solid var(--border)" }}>
+            <label style={{ display: "block", fontSize: "13px", color: "var(--text-2)", fontWeight: 600, marginBottom: "10px" }}>
               Repeat
             </label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px" }}>
               <select value={form.recurrence}
                 onChange={(e) => setForm((f) => ({ ...f, recurrence: e.target.value }))}
-                style={{ padding: "9px 10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}>
+                style={{ padding: "9px 10px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "13px", boxSizing: "border-box" }}>
                 <option value="">Does not repeat</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
@@ -461,7 +508,7 @@ export default function CalendarPage() {
                       onChange={(e) => setForm((f) => ({ ...f, interval: e.target.value }))}
                       placeholder="Every N"
                       title="Repeat every N periods"
-                      style={{ width: "100%", padding: "9px 10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }} />
+                      style={{ width: "100%", padding: "9px 10px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "13px", boxSizing: "border-box" }} />
                   </div>
                   <DateInput value={form.end_date}
                     onChange={(v) => setForm((f) => ({ ...f, end_date: v, end_count: "" }))} />
@@ -471,13 +518,13 @@ export default function CalendarPage() {
                       onChange={(e) => setForm((f) => ({ ...f, end_count: e.target.value, end_date: "" }))}
                       placeholder="# times"
                       title="Number of occurrences"
-                      style={{ width: "100%", padding: "9px 10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }} />
+                      style={{ width: "100%", padding: "9px 10px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "13px", boxSizing: "border-box" }} />
                   </div>
                 </>
               )}
             </div>
             {form.recurrence && (
-              <p style={{ margin: "8px 0 0", color: "#94a3b8", fontSize: "12px" }}>
+              <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: "12px" }}>
                 Set an end date <em>or</em> a number of occurrences (not both).
               </p>
             )}
@@ -485,35 +532,38 @@ export default function CalendarPage() {
 
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button onClick={handleCreate} disabled={saving}
-              style={{ background: "#10b981", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+              style={{ background: "var(--accent)", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
               {saving ? "Saving…" : "Save Event"}
             </button>
             <button onClick={() => { setShowForm(false); setMsg(""); }}
-              style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
+              style={{ background: "transparent", color: "var(--muted)", border: "1px solid var(--border)", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
               Cancel
             </button>
-            {msg && <span style={{ color: msg.startsWith("Error") ? "#ef4444" : "#10b981", fontSize: "14px" }}>{msg}</span>}
+            {msg && <span style={{ color: msg.startsWith("Error") ? "var(--danger)" : "var(--ok)", fontSize: "14px" }}>{msg}</span>}
           </div>
         </motion.div>
       )}
 
       {/* Calendar area */}
       <div style={{ display: "grid", gridTemplateColumns: selectedDayEvents ? "2fr 1fr" : "1fr", gap: "20px" }}>
-        <div style={{ background: "white", borderRadius: "24px", padding: "20px", boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
+        {eventsLoading && allEvents.length === 0 ? (
+          <Skeleton height="70vh" radius={24} />
+        ) : (
+        <div style={{ background: "var(--surface)", borderRadius: "24px", padding: "20px", boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
 
           {/* Year view navigator */}
           {activeView === "year" && (
             <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "20px" }}>
               <button onClick={() => setYearNav((y) => y - 1)}
-                style={{ background: "#f1f5f9", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 700 }}>
+                style={{ background: "var(--surface-2)", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 700 }}>
                 ‹
               </button>
               <h2 style={{ margin: 0 }}>{yearNav}</h2>
               <button onClick={() => setYearNav((y) => y + 1)}
-                style={{ background: "#f1f5f9", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 700 }}>
+                style={{ background: "var(--surface-2)", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 700 }}>
                 ›
               </button>
-              <span style={{ color: "#94a3b8", fontSize: "13px" }}>
+              <span style={{ color: "var(--muted)", fontSize: "13px" }}>
                 {allEvents.filter((e) => String(e.event_date).startsWith(String(yearNav))).length} events ·{" "}
                 {allTasks.filter((t) => t.due_date && String(t.due_date).startsWith(String(yearNav))).length} tasks
               </span>
@@ -531,6 +581,7 @@ export default function CalendarPage() {
             />
           )}
         </div>
+        )}
 
         {/* Day detail panel */}
         {selectedDayEvents && (
@@ -538,7 +589,7 @@ export default function CalendarPage() {
             initial={{ opacity: 0, x: 30 }}
             animate={{ opacity: 1, x: 0 }}
             style={{
-              background: "rgba(255,255,255,0.9)",
+              background: "var(--surface)",
               backdropFilter: "blur(10px)",
               borderRadius: "24px",
               padding: "22px",
@@ -548,41 +599,46 @@ export default function CalendarPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <h3 style={{ margin: 0 }}>{fmtDate(selectedDayEvents.date)}</h3>
               <button onClick={() => setSelectedDayEvents(null)}
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "18px" }}>
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "18px" }}>
                 ×
               </button>
             </div>
 
             {selectedDayEvents.events.length === 0 ? (
-              <p style={{ color: "#94a3b8", fontSize: "14px" }}>No events on this day.</p>
+              <p style={{ color: "var(--muted)", fontSize: "14px" }}>No events on this day.</p>
             ) : (
               selectedDayEvents.events.map((ev) => (
                 <div key={ev.id} style={{
-                  background: "#f8fafc", borderRadius: "12px",
+                  background: "var(--bg)", borderRadius: "12px",
                   padding: "14px", marginBottom: "10px",
-                  border: "1px solid #e2e8f0",
+                  border: "1px solid var(--border)",
                 }}>
                   <p style={{ margin: "0 0 4px", fontWeight: 700 }}>{ev.title}</p>
-                  {ev.event_time && <p style={{ margin: "0 0 4px", color: "#2563eb", fontSize: "13px" }}>{ev.event_time.slice(0,5)}</p>}
-                  {ev.venue     && <p style={{ margin: "0 0 4px", color: "#64748b", fontSize: "13px" }}>{ev.venue}</p>}
-                  {ev.attendees && <p style={{ margin: "0 0 8px", color: "#64748b", fontSize: "13px" }}>👥 {ev.attendees}</p>}
+                  {ev.event_time && (
+                    <p style={{ margin: "0 0 4px", color: "var(--accent)", fontSize: "13px" }}>
+                      {ev.event_time.slice(0, 5)}
+                      {ev.event_end_time && ` - ${ev.event_end_time.slice(0, 5)}`}
+                    </p>
+                  )}
+                  {ev.venue     && <p style={{ margin: "0 0 4px", color: "var(--muted)", fontSize: "13px" }}>{ev.venue}</p>}
+                  {ev.attendees && <p style={{ margin: "0 0 8px", color: "var(--muted)", fontSize: "13px" }}>👥 {ev.attendees}</p>}
                   {ev.classification && (
                     <span style={{
-                      fontSize: "11px", background: "#faf5ff", color: "#7c3aed",
+                      fontSize: "11px", background: "var(--surface-2)", color: "var(--text-2)",
                       padding: "2px 8px", borderRadius: "99px", marginRight: "8px",
                     }}>{ev.classification}</span>
                   )}
                   <div style={{ display: "flex", gap: "6px", marginTop: "8px", justifyContent: "flex-end" }}>
                     <button onClick={() => setDetailEventId(ev.id)}
-                      style={{ background: "#2563eb", color: "white", border: "none", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
+                      style={{ background: "var(--accent)", color: "white", border: "none", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
                       Details
                     </button>
                     <button onClick={() => startEdit(ev)}
-                      style={{ background: "transparent", color: "#2563eb", border: "1px solid #2563eb", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
+                      style={{ background: "transparent", color: "var(--accent)", border: "1px solid var(--accent)", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
                       Edit
                     </button>
                     <button onClick={() => handleDelete(ev.id)}
-                      style={{ background: "transparent", color: "#ef4444", border: "1px solid #ef4444", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
+                      style={{ background: "transparent", color: "var(--danger)", border: "1px solid var(--danger)", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
                       Delete
                     </button>
                   </div>
@@ -593,19 +649,19 @@ export default function CalendarPage() {
             {/* Tasks due on this day */}
             {selectedDayEvents.tasks && selectedDayEvents.tasks.length > 0 && (
               <div style={{ marginTop: "6px" }}>
-                <p style={{ margin: "0 0 8px", fontSize: "12px", fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <p style={{ margin: "0 0 8px", fontSize: "12px", fontWeight: 700, color: "var(--ok)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   Tasks due
                 </p>
                 {selectedDayEvents.tasks.map((t) => (
                   <div key={`t-${t.id}`} style={{
-                    background: "#f0fdf4", borderRadius: "12px",
+                    background: "var(--ok-soft)", borderRadius: "12px",
                     padding: "12px 14px", marginBottom: "8px",
-                    border: "1px solid #bbf7d0",
+                    border: "1px solid var(--ok)",
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                   }}>
                     <span style={{ fontWeight: 600, fontSize: "14px" }}>📋 {t.title}</span>
                     <button onClick={() => setDetailTaskId(t.id)}
-                      style={{ background: "transparent", color: "#16a34a", border: "1px solid #16a34a", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
+                      style={{ background: "transparent", color: "var(--ok)", border: "1px solid var(--ok)", padding: "3px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}>
                       Details
                     </button>
                   </div>
@@ -617,12 +673,12 @@ export default function CalendarPage() {
               onClick={() => { setShowForm(true); setForm((f) => ({ ...f, event_date: selectedDayEvents.date })); }}
               style={{
                 marginTop: "10px", width: "100%",
-                background: "#2563eb", color: "white",
+                background: "var(--accent)", color: "white",
                 border: "none", padding: "10px", borderRadius: "10px",
                 cursor: "pointer", fontWeight: 600, fontSize: "14px",
               }}
             >
-              + Add Event on this Day
+              + New event on this day
             </button>
           </motion.div>
         )}
@@ -630,7 +686,7 @@ export default function CalendarPage() {
 
       {/* Count chip */}
       {activeView !== "year" && counts && (
-        <p style={{ color: "#94a3b8", fontSize: "13px", marginTop: "12px" }}>
+        <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "12px" }}>
           {counts.events} events · {counts.tasks} tasks shown
         </p>
       )}
@@ -650,14 +706,14 @@ export default function CalendarPage() {
             animate={{ opacity: 1, scale: 1 }}
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "white", borderRadius: "18px", padding: "26px",
+              background: "var(--surface)", borderRadius: "18px", padding: "26px",
               width: "100%", maxWidth: "440px", boxShadow: "0 30px 80px rgba(0,0,0,0.3)",
             }}
           >
             <h3 style={{ margin: "0 0 10px", fontSize: "20px" }}>
               {deleteTarget.isRecurring ? "Delete repeating event" : "Move to trash"}
             </h3>
-            <p style={{ margin: "0 0 22px", color: "#475569", fontSize: "14px" }}>
+            <p style={{ margin: "0 0 22px", color: "var(--text-2)", fontSize: "14px" }}>
               {deleteTarget.isRecurring ? (
                 <>
                   <strong>{deleteTarget.title}</strong> repeats. Delete just this
@@ -675,22 +731,22 @@ export default function CalendarPage() {
               {deleteTarget.isRecurring ? (
                 <>
                   <button onClick={() => performDelete("occurrence")}
-                    style={{ background: "#f1f5f9", color: "#0f172a", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
+                    style={{ background: "var(--surface-2)", color: "var(--text)", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
                     Delete this occurrence only
                   </button>
                   <button onClick={() => performDelete("series")}
-                    style={{ background: "#ef4444", color: "white", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
+                    style={{ background: "var(--danger)", color: "white", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
                     Delete entire series
                   </button>
                 </>
               ) : (
                 <button onClick={() => performDelete("occurrence")}
-                  style={{ background: "#ef4444", color: "white", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
+                  style={{ background: "var(--danger)", color: "white", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}>
                   Delete
                 </button>
               )}
               <button onClick={() => setDeleteTarget(null)}
-                style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "12px", borderRadius: "10px", cursor: "pointer", fontSize: "14px" }}>
+                style={{ background: "transparent", color: "var(--muted)", border: "1px solid var(--border)", padding: "12px", borderRadius: "10px", cursor: "pointer", fontSize: "14px" }}>
                 Cancel
               </button>
             </div>
@@ -713,7 +769,7 @@ export default function CalendarPage() {
             animate={{ opacity: 1, scale: 1 }}
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "white", borderRadius: "20px",
+              background: "var(--surface)", borderRadius: "20px",
               padding: "26px", width: "100%", maxWidth: "520px",
               boxShadow: "0 30px 80px rgba(0,0,0,0.3)",
             }}
@@ -721,54 +777,69 @@ export default function CalendarPage() {
             <h3 style={{ margin: "0 0 18px" }}>Edit / Reschedule Event</h3>
 
             <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Title</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Title</label>
               <input type="text" value={editing.title}
                 onChange={(e) => setEditing((d) => ({ ...d, title: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }} />
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }} />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <DateInput label="Date" value={editing.event_date}
                 onChange={(v) => setEditing((d) => ({ ...d, event_date: v }))} />
               <div>
-                <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Time</label>
+                <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Start Time</label>
                 <input type="time" value={editing.event_time}
                   onChange={(e) => setEditing((d) => ({ ...d, event_time: e.target.value }))}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }} />
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>End Time</label>
+                <input type="time" value={editing.event_end_time || ""}
+                  onChange={(e) => setEditing((d) => ({ ...d, event_end_time: e.target.value }))}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }} />
               </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div>
-                <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Venue</label>
+                <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Venue</label>
                 <input type="text" value={editing.venue}
                   onChange={(e) => setEditing((d) => ({ ...d, venue: e.target.value }))}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }} />
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }} />
               </div>
               <div>
-                <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Attendees</label>
+                <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Attendees</label>
                 <input type="text" value={editing.attendees}
                   onChange={(e) => setEditing((d) => ({ ...d, attendees: e.target.value }))}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }} />
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }} />
               </div>
             </div>
 
             <div style={{ marginBottom: "18px" }}>
-              <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>Classification</label>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Classification</label>
               <select value={editing.classification}
                 onChange={(e) => setEditing((d) => ({ ...d, classification: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" }}>
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}>
                 {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: "18px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>Priority</label>
+              <select value={editing.priority}
+                onChange={(e) => setEditing((d) => ({ ...d, priority: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-2)", fontSize: "14px", boxSizing: "border-box" }}>
+                {["Low", "Medium", "High", "Critical"].map((p) => <option key={p}>{p}</option>)}
               </select>
             </div>
 
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <button onClick={() => setEditing(null)}
-                style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
+                style={{ background: "transparent", color: "var(--muted)", border: "1px solid var(--border)", padding: "10px 22px", borderRadius: "10px", cursor: "pointer" }}>
                 Cancel
               </button>
               <button onClick={handleUpdate}
-                style={{ background: "#2563eb", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+                style={{ background: "var(--accent)", color: "white", border: "none", padding: "10px 22px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
                 Save Changes
               </button>
             </div>

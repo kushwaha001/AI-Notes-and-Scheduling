@@ -145,14 +145,17 @@ def get_event(event_id: int, user: CurrentUser = Depends(current_user)):
         extractions = []
         if docs:
             doc_ids = [d["id"] for d in docs]
+            # Only the LATEST extraction per source document — re-extraction adds a
+            # new row each time, which otherwise showed as repeated identical summaries.
             cur.execute("""
-                SELECT subject, event_date, event_time, venue, attendees,
+                SELECT DISTINCT ON (source_id)
+                       subject, event_date, event_time, venue, attendees,
                        ref_number, deadline, reply_by, reply_by_overdue,
                        meeting_date_flag, field_confidence, model_name,
                        item_type, status, extracted_at
                 FROM extractions
                 WHERE source_type = 'document' AND source_id = ANY(%s)
-                ORDER BY extracted_at DESC
+                ORDER BY source_id, extracted_at DESC
             """, (doc_ids,))
             extractions = cur.fetchall()
 
@@ -219,14 +222,14 @@ def create_event_manual(event: ManualEvent,
         for i, d in enumerate(dates):
             cur.execute("""
                 INSERT INTO events
-                    (users_id, title, event_date, event_time, venue, attendees,
-                     classification, source, status, recurrence_id, parent_event_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'manual', 'upcoming', %s, %s)
+                    (users_id, title, event_date, event_time, event_end_time, venue, attendees,
+                     classification, priority, source, status, recurrence_id, parent_event_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'manual', 'upcoming', %s, %s)
                 RETURNING id
             """, (
-                user["id"], event.title, d, event.event_time or None,
+                user["id"], event.title, d, event.event_time or None, event.event_end_time or None,
                 event.venue or None, event.attendees or None,
-                classification, recurrence_id,
+                classification, (event.priority or "Medium"), recurrence_id,
                 first_id if i > 0 else None,
             ))
             eid = cur.fetchone()["id"]
@@ -267,9 +270,11 @@ def update_event(event_id: int, update: EventUpdate,
         fields = {}
         if update.title      is not None: fields["title"]      = update.title
         if update.event_time is not None: fields["event_time"] = update.event_time or None
+        if update.event_end_time is not None: fields["event_end_time"] = update.event_end_time or None
         if update.venue      is not None: fields["venue"]      = update.venue or None
         if update.attendees  is not None: fields["attendees"]  = update.attendees or None
         if update.category   is not None: fields["classification"] = update.category
+        if update.priority   is not None: fields["priority"]   = update.priority or "Medium"
         if update.event_date is not None:
             fields["event_date"] = _parse_date(update.event_date)
 

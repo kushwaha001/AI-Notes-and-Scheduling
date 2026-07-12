@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
-import { getEvents } from "../services/api";
+import { getEvents, getPendingReplies } from "../services/api";
 
 /**
  * FR-37 — Browser notification reminders.
  * Known limitation (per spec): fires only while the browser/tab is open and
  * permission is granted; the dashboard/timeline remains the source of truth.
+ * The Notification API needs a secure context (https or localhost) — on plain
+ * http it's simply unavailable and everything here degrades silently.
  */
 
-const CHECK_INTERVAL_MS = 60 * 1000;       // poll once a minute
-const LEAD_MINUTES      = [60, 15];         // remind 1h and 15m before
+const CHECK_INTERVAL_MS = 60 * 1000;         // event reminders: poll once a minute
+const REPLY_CHECK_MS    = 10 * 60 * 1000;    // replies due: every 10 minutes
+const LEAD_MINUTES      = [60, 15];          // remind 1h and 15m before
 
 const fired = new Set();                    // de-dupe per session
+
+const notifiable = () =>
+  typeof Notification !== "undefined" && window.isSecureContext;
 
 function eventDateTime(ev) {
   if (!ev.event_date) return null;
@@ -24,7 +30,7 @@ const DISMISS_KEY = "reminders_prompt_dismissed";
 
 export default function NotificationManager() {
   const [perm, setPerm] = useState(
-    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+    notifiable() ? Notification.permission : "unsupported"
   );
   const [dismissed, setDismissed] = useState(
     () => localStorage.getItem(DISMISS_KEY) === "1"
@@ -68,6 +74,43 @@ export default function NotificationManager() {
     return () => clearInterval(id);
   }, [perm]);
 
+  // Replies due — one desktop notification per letter per day, so an
+  // approaching reply-by date can't slip by unnoticed.
+  useEffect(() => {
+    if (perm !== "granted") return;
+
+    async function checkReplies() {
+      let rows = [];
+      try { rows = await getPendingReplies(); } catch { return; }
+      if (!Array.isArray(rows)) return;
+      const today = new Date().toISOString().slice(0, 10);
+      rows.forEach((r) => {
+        const id = r.id ?? r.doc_id ?? r.document_id;
+        const due = r.reply_by || r.due_date || r.deadline;
+        if (!id || !due) return;
+        // Only nag when it's actually near: due within 3 days, or overdue.
+        const days = (new Date(String(due).split("T")[0]) - new Date()) / 86400000;
+        if (days > 3) return;
+        const key = `reply-${id}-${today}`;
+        try {
+          if (localStorage.getItem(key)) return;      // once per letter per day
+          localStorage.setItem(key, "1");
+        } catch { /* private mode — fall back to session de-dupe */
+          if (fired.has(key)) return; fired.add(key);
+        }
+        const name = r.filename || r.title || r.ref_number || `letter #${id}`;
+        new Notification(`Reply due: ${name}`, {
+          body: `Reply by ${String(due).split("T")[0]} — open Letters to draft it.`,
+          tag : key,
+        });
+      });
+    }
+
+    checkReplies();
+    const id = setInterval(checkReplies, REPLY_CHECK_MS);
+    return () => clearInterval(id);
+  }, [perm]);
+
   // Hide once granted, unsupported, or the user dismissed/blocked it
   if (perm === "unsupported" || perm === "granted" || perm === "denied" || dismissed)
     return null;
@@ -77,27 +120,27 @@ export default function NotificationManager() {
     <div
       style={{
         position: "fixed", bottom: "20px", right: "20px", zIndex: 1000,
-        background: "white", borderRadius: "14px", padding: "16px 20px",
-        boxShadow: "0 10px 40px rgba(0,0,0,0.15)", maxWidth: "300px",
-        border: "1px solid #e2e8f0",
+        background: "var(--surface)", borderRadius: "14px", padding: "16px 20px",
+        boxShadow: "var(--shadow)", maxWidth: "300px",
+        border: "1px solid var(--border)",
       }}
     >
-      <p style={{ margin: "0 0 10px", fontSize: "14px", color: "#0f172a", fontWeight: 600 }}>
+      <p style={{ margin: "0 0 10px", fontSize: "14px", color: "var(--text)", fontWeight: 600 }}>
         Enable event reminders?
       </p>
-      <p style={{ margin: "0 0 12px", fontSize: "12px", color: "#64748b" }}>
+      <p style={{ margin: "0 0 12px", fontSize: "12px", color: "var(--muted)" }}>
         Get a browser notification before your meetings.
       </p>
       <div style={{ display: "flex", gap: "8px" }}>
         <button
           onClick={() => Notification.requestPermission().then((p) => { setPerm(p); if (p !== "granted") dismiss(); })}
-          style={{ background: "#2563eb", color: "white", border: "none", padding: "7px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 600, fontSize: "13px" }}
+          style={{ background: "var(--accent)", color: "white", border: "none", padding: "7px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: 600, fontSize: "13px" }}
         >
           Enable
         </button>
         <button
           onClick={dismiss}
-          style={{ background: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "7px 16px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}
+          style={{ background: "transparent", color: "var(--text-2)", border: "1px solid var(--border-2)", padding: "7px 16px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}
         >
           Don't ask again
         </button>

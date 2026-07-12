@@ -97,17 +97,20 @@ export default function DateInput({ value, onChange, label, required, style }) {
     }
   }
 
+  // Theme variables, not hardcoded white/slate — the pickers were staying light
+  // in dark mode.
   const selStyle = {
-    padding: "10px 8px", borderRadius: "8px", border: "1px solid #cbd5e1",
-    fontSize: "14px", boxSizing: "border-box", background: "white", cursor: "pointer",
+    padding: "10px 8px", borderRadius: "8px", border: "1px solid var(--border-2)",
+    fontSize: "14px", boxSizing: "border-box", background: "var(--bg)",
+    color: "var(--text)", cursor: "pointer",
   };
 
   return (
     <div style={style}>
       {label && (
-        <label style={{ display: "block", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>
+        <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>
           {label}{required ? " *" : ""}
-          <span style={{ color: "#94a3b8", fontSize: "11px", marginLeft: "6px" }}>DD/MM/YYYY</span>
+          <span style={{ color: "var(--muted)", fontSize: "11px", marginLeft: "6px" }}>DD/MM/YYYY</span>
         </label>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 1.2fr", gap: "6px" }}>

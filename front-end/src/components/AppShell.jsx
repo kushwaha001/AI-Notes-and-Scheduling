@@ -1,8 +1,9 @@
 import Sidebar from "./Sidebar";
-import BackgroundBlobs from "./BackgroundBlobs";
+import Topbar from "./Topbar";
 import NotificationManager from "./NotificationManager";
 import BackendStatus from "./BackendStatus";
 import UserMenu from "./UserMenu";
+import { AttentionPopup } from "./NeedsAttention";
 
 function AppShell({ children, user }) {
   return (
@@ -10,37 +11,21 @@ function AppShell({ children, user }) {
       style={{
         display: "flex",
         minHeight: "100vh",
-        background:
-          "linear-gradient(to bottom right, #f8fafc, #ffffff)",
-        color: "#0f172a",
+        background: "var(--bg)",
+        color: "var(--text)",
         position: "relative",
       }}
     >
-      <BackgroundBlobs />
       <NotificationManager />
       <BackendStatus />
       <UserMenu user={user} />
+      <AttentionPopup />
 
       <Sidebar />
 
-      <main
-        style={{
-          flex: 1,
-          padding: "40px",
-          overflowY: "auto",
-          position: "relative",
-          zIndex: 1,
-          scrollBehavior: "smooth",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "1600px",
-            margin: "0 auto",
-          }}
-        >
-          {children}
-        </div>
+      <main style={{ flex: 1, minWidth: 0, position: "relative", scrollBehavior: "smooth" }}>
+        <Topbar user={user} />
+        <div style={{ padding: "34px 40px" }}>{children}</div>
       </main>
     </div>
   );

@@ -52,17 +52,17 @@ export default function AuditLogPage() {
     <>
       <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "12px" }}>
         <div>
-          <p style={{ color: "#60a5fa", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
+          <p style={{ color: "var(--accent)", letterSpacing: "2px", textTransform: "uppercase", fontSize: "14px", marginBottom: "8px" }}>
             Audit Trail
           </p>
           <h1 style={{ margin: 0, fontSize: "42px" }}>Audit Log</h1>
-          <p style={{ color: "#64748b", marginTop: "10px" }}>
+          <p style={{ color: "var(--muted)", marginTop: "10px" }}>
             A complete, timestamped record of every action — uploads, extractions,
             confirmations, edits, reschedules, deletions, restores and status changes.
           </p>
         </div>
         <button onClick={load}
-          style={{ background: "#2563eb", color: "white", border: "none", padding: "10px 20px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
+          style={{ background: "var(--accent)", color: "white", border: "none", padding: "10px 20px", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}>
           Refresh
         </button>
       </div>
@@ -72,8 +72,8 @@ export default function AuditLogPage() {
         <button onClick={() => setEntityType("")}
           style={{
             padding: "8px 16px", borderRadius: "10px", border: "none",
-            background: entityType === "" ? "#2563eb" : "#f1f5f9",
-            color: entityType === "" ? "white" : "#475569",
+            background: entityType === "" ? "var(--accent)" : "var(--surface-2)",
+            color: entityType === "" ? "white" : "var(--text-2)",
             fontWeight: 600, cursor: "pointer", fontSize: "14px",
           }}>
           All
@@ -82,8 +82,8 @@ export default function AuditLogPage() {
           <button key={t} onClick={() => setEntityType(t)}
             style={{
               padding: "8px 16px", borderRadius: "10px", border: "none",
-              background: entityType === t ? "#2563eb" : "#f1f5f9",
-              color: entityType === t ? "white" : "#475569",
+              background: entityType === t ? "var(--accent)" : "var(--surface-2)",
+              color: entityType === t ? "white" : "var(--text-2)",
               fontWeight: 600, cursor: "pointer", fontSize: "14px", textTransform: "capitalize",
             }}>
             {t}s
@@ -91,7 +91,7 @@ export default function AuditLogPage() {
         ))}
         <div style={{ flex: 1 }} />
         <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}
-          style={{ padding: "8px 12px", borderRadius: "10px", border: "1px solid #cbd5e1", fontSize: "14px" }}>
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1px solid var(--border-2)", fontSize: "14px" }}>
           <option value={50}>Last 50</option>
           <option value={100}>Last 100</option>
           <option value={250}>Last 250</option>
@@ -99,26 +99,26 @@ export default function AuditLogPage() {
         </select>
       </div>
 
-      {error && <p style={{ color: "#ef4444" }}>{error}</p>}
-      {loading && <p style={{ color: "#94a3b8" }}>Loading audit log…</p>}
+      {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
+      {loading && <p style={{ color: "var(--muted)" }}>Loading audit log…</p>}
 
       {!loading && entries.length === 0 && (
-        <div style={{ background: "white", borderRadius: "20px", padding: "60px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
-          <p style={{ color: "#94a3b8", fontSize: "18px" }}>No activity recorded yet.</p>
+        <div style={{ background: "var(--surface)", borderRadius: "20px", padding: "60px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
+          <p style={{ color: "var(--muted)", fontSize: "18px" }}>No activity recorded yet.</p>
         </div>
       )}
 
       {Object.entries(groups).map(([day, items]) => (
         <div key={day} style={{ marginBottom: "24px" }}>
-          <h3 style={{ margin: "0 0 12px", color: "#475569", fontSize: "15px" }}>{day}</h3>
-          <div style={{ background: "white", borderRadius: "18px", padding: "8px 20px", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
+          <h3 style={{ margin: "0 0 12px", color: "var(--text-2)", fontSize: "15px" }}>{day}</h3>
+          <div style={{ background: "var(--surface)", borderRadius: "18px", padding: "8px 20px", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
             {items.map((e) => (
               <motion.div
                 key={e.id}
                 whileHover={{ x: 3 }}
                 style={{
                   display: "flex", alignItems: "center", gap: "14px",
-                  padding: "12px 0", borderBottom: "1px solid #f1f5f9",
+                  padding: "12px 0", borderBottom: "1px solid var(--border)",
                 }}
               >
                 <span style={{
@@ -133,11 +133,13 @@ export default function AuditLogPage() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontSize: "14px" }}>
                     <strong style={{ textTransform: "capitalize" }}>{e.entity_type}</strong>
-                    {" "}#{e.entity_id}
-                    {e.detail ? <span style={{ color: "#64748b" }}> — {e.detail}</span> : ""}
+                    {e.entity_name
+                      ? <span style={{ fontWeight: 600 }}>{` "${e.entity_name}"`}</span>
+                      : ` #${e.entity_id}`}
+                    {e.detail ? <span style={{ color: "var(--muted)" }}> — {e.detail}</span> : ""}
                   </span>
                 </div>
-                <span style={{ color: "#94a3b8", fontSize: "12px", whiteSpace: "nowrap" }}>
+                <span style={{ color: "var(--muted)", fontSize: "12px", whiteSpace: "nowrap" }}>
                   {fmtTime(e.created_at)}
                 </span>
               </motion.div>

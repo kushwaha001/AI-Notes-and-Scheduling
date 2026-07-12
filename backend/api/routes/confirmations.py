@@ -90,15 +90,16 @@ def confirm_item(item: ConfirmItem, user: CurrentUser = Depends(current_user)):
 
             cur.execute("""
                 INSERT INTO events
-                    (users_id, title, event_date, event_time, venue, attendees,
+                    (users_id, title, event_date, event_time, event_end_time, venue, attendees,
                      classification, source, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
                 RETURNING id
             """, (
                 user["id"],
                 item.title,
                 item.event_date or None,
                 item.event_time or None,
+                item.event_end_time or None,
                 item.venue      or None,
                 item.attendees  or None,
                 item.category or item.priority or None,
@@ -144,13 +145,15 @@ def confirm_item(item: ConfirmItem, user: CurrentUser = Depends(current_user)):
         else:
             cur.execute("""
                 INSERT INTO tasks
-                    (users_id, title, due_date, classification, source, status)
-                VALUES (%s, %s, %s, %s, 'ai', 'open')
+                    (users_id, title, due_date, start_time, end_time, classification, source, status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'ai', 'open')
                 RETURNING id
             """, (
                 user["id"],
                 item.title,
                 item.due_date or None,
+                item.event_time or None,
+                item.event_end_time or None,
                 item.category or item.priority or None,
             ))
             entity_id   = cur.fetchone()["id"]
@@ -223,7 +226,7 @@ def confirm_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
         doc_id = row["document_id"] if row else None
 
         cur.execute("""
-            SELECT id, item_type, subject, event_date, event_time, venue,
+            SELECT id, item_type, subject, event_date, event_time, event_end_time, venue,
                    attendees, deadline, reply_by
             FROM   extractions
             WHERE  source_type = 'document' AND source_id = %s AND status = 'pending'
@@ -257,11 +260,11 @@ def confirm_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
 
                 cur.execute("""
                     INSERT INTO events
-                        (users_id, title, event_date, event_time, venue, attendees,
+                        (users_id, title, event_date, event_time, event_end_time, venue, attendees,
                          source, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'ai', 'upcoming')
                     RETURNING id
-                """, (user["id"], title, ex["event_date"], ex["event_time"],
+                """, (user["id"], title, ex["event_date"], ex["event_time"], ex["event_end_time"],
                       ex["venue"], ex["attendees"]))
                 event_id = cur.fetchone()["id"]
                 events_added += 1
@@ -294,10 +297,10 @@ def confirm_all(body: ConfirmAll, user: CurrentUser = Depends(current_user)):
                 due = ex["deadline"] or ex["reply_by"] or ex["event_date"]
                 cur.execute("""
                     INSERT INTO tasks
-                        (users_id, title, due_date, classification, source, status)
-                    VALUES (%s, %s, %s, NULL, 'ai', 'open')
+                        (users_id, title, due_date, start_time, end_time, classification, source, status)
+                    VALUES (%s, %s, %s, %s, %s, NULL, 'ai', 'open')
                     RETURNING id
-                """, (user["id"], title, due))
+                """, (user["id"], title, due, ex["event_time"], ex["event_end_time"]))
                 task_id = cur.fetchone()["id"]
                 tasks_added += 1
                 cur.execute("""
@@ -470,7 +473,7 @@ def confirmation_detail(job_id: int, user: CurrentUser = Depends(current_user)):
             raise HTTPException(404, "Job not found.")
 
         cur.execute("""
-            SELECT id, item_type, subject, event_date, event_time, venue, attendees,
+            SELECT id, item_type, subject, event_date, event_time, event_end_time, venue, attendees,
                    ref_number, deadline, reply_by, reply_by_overdue, meeting_date_flag,
                    field_confidence, model_name, status, extracted_at
             FROM   extractions

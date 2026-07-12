@@ -72,19 +72,23 @@ def _disk_stats():
 
 def _model_status():
     """Ask the LLM server which models it serves (FR-41 'is the model loaded').
-    Works with any OpenAI-compatible server (vLLM, Ollama /v1)."""
-    info = {"loaded": False, "model": LLM_MODEL or "(auto)", "resident": [], "reachable": False}
-    hdr = {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
+    Works with any OpenAI-compatible server (vLLM, Ollama /v1). Uses the LIVE
+    config (Settings-page overrides included), not just .env."""
+    from api.ai.llm import current_config
+    cfg = current_config()
+    info = {"loaded": False, "model": cfg["model"] or "(auto)", "resident": [],
+            "reachable": False, "base_url": cfg["base_url"]}
+    hdr = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
     try:
         with httpx.Client(timeout=3) as c:
-            r = c.get(f"{LLM_BASE_URL}/models", headers=hdr)
+            r = c.get(f"{cfg['base_url']}/models", headers=hdr)
             if r.status_code == 200:
                 info["reachable"] = True
                 ids = [m.get("id", "") for m in (r.json().get("data") or [])]
                 info["resident"] = ids
-                if LLM_MODEL:
-                    base = LLM_MODEL.split(":")[0]
-                    info["loaded"] = any(i == LLM_MODEL or i.split(":")[0] == base for i in ids)
+                if cfg["model"]:
+                    base = cfg["model"].split(":")[0]
+                    info["loaded"] = any(i == cfg["model"] or i.split(":")[0] == base for i in ids)
                 else:
                     info["loaded"] = len(ids) > 0
     except Exception:

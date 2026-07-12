@@ -89,7 +89,7 @@ def list_notes(classification: Optional[str] = None,
     cur = conn.cursor()
     try:
         query = ("SELECT id, title, classification, linked_entity_type, "
-                 "linked_entity_id, created_at FROM notes "
+                 "linked_entity_id, created_at, ai_summary, ai_tags FROM notes "
                  "WHERE status = 'active' AND users_id = %s")
         params = [user["id"]]
         if classification:
@@ -113,6 +113,9 @@ def list_notes(classification: Optional[str] = None,
                 # human label for the linked event/task (None if it was deleted)
                 "linked_entity_title": _entity_title(
                     cur, r["linked_entity_type"], r["linked_entity_id"], user["id"]),
+                # AI auto-summary + tags (may be null until generated)
+                "summary": r["ai_summary"],
+                "tags"   : (r["ai_tags"].split(",") if r["ai_tags"] else []),
             })
         return {"notes": notes}
     finally:
@@ -182,6 +185,8 @@ def get_note(note_id: int, user: CurrentUser = Depends(current_user)):
             "title"         : row["title"],
             "classification": row["classification"],
             "content"       : content,
+            "summary"       : row.get("ai_summary"),
+            "tags"          : (row["ai_tags"].split(",") if row.get("ai_tags") else []),
         }
     finally:
         cur.close()
@@ -351,18 +356,54 @@ def delete_note(note_id: int, user: CurrentUser = Depends(current_user)):
         conn.close()
 
 
-@router.post("/notes/{note_id}/schedule")
-def schedule_note(note_id: int, user: CurrentUser = Depends(current_user)):
-    """Q4 — convert note into task/event via LLM extraction (AI not yet wired)."""
+@router.post("/notes/{note_id}/summarize")
+def summarize_note(note_id: int, user: CurrentUser = Depends(current_user)):
+    """Generate (or refresh) the note's AI one-line summary + topic tags with the
+    local LLM, store them, and return them. Best-effort — returns empties when the
+    LLM is offline, and never fails the request (NFR-9)."""
     conn = get_db()
     cur = conn.cursor()
     try:
         _assert_owned(cur, note_id, user["id"])
+
+        content = ""
+        path = _note_path(note_id)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+        from api.ai.summarize import summarize_and_tag
+        st = summarize_and_tag(content)
+
+        cur.execute(
+            "UPDATE notes SET ai_summary = %s, ai_tags = %s WHERE id = %s",
+            (st["summary"] or None, ",".join(st["tags"]) or None, note_id),
+        )
+        conn.commit()
+        return {"note_id": note_id, "summary": st["summary"], "tags": st["tags"]}
     finally:
         cur.close()
         conn.close()
-    return {
-        "job_id"     : "",
-        "extractions": [],
-        "message"    : "AI extraction not yet configured. Use manual event/task creation.",
-    }
+
+
+@router.post("/notes/{note_id}/schedule")
+def schedule_note(note_id: int, user: CurrentUser = Depends(current_user)):
+    """Extract the tasks/events implied by a note (local LLM), for the user to
+    review and add. Nothing is saved here — the frontend confirms each item."""
+    conn = get_db()
+    cur = conn.cursor()
+    content = ""
+    try:
+        _assert_owned(cur, note_id, user["id"])
+        path = _note_path(note_id)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+    finally:
+        cur.close()
+        conn.close()
+
+    from api.ai.generate import extract_actions
+    items = extract_actions(content)
+    return {"note_id": note_id, "items": items,
+            "message": "" if items else "No tasks or events found in this note."}
